@@ -1,6 +1,6 @@
 package ports
 
-import "github.com/agent-session/agent-session/internal/domain/entities"
+import "github.com/anaknegeri/agent-session/internal/domain/entities"
 
 // ContextRenderer renders a canonical snapshot to human-readable markdown
 // (context.md) and handoff text (PRD §4.5, §24).

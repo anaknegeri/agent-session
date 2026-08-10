@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	"github.com/agent-session/agent-session/internal/domain/entities"
-	"github.com/agent-session/agent-session/pkg/ids"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
 // LargePayloadThreshold is the size above which event payloads are stored as

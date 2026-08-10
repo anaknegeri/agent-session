@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/agent-session/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 func TestArtifactLargePayload(t *testing.T) {

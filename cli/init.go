@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-session/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
 )
 
 func newInitCmd() *cobra.Command {

@@ -3,10 +3,10 @@ package providers
 import (
 	"log/slog"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	app "github.com/agent-session/agent-session/internal/application/services"
-	mdc "github.com/agent-session/agent-session/internal/infrastructure/context"
-	gitrunner "github.com/agent-session/agent-session/internal/infrastructure/git"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	app "github.com/anaknegeri/agent-session/internal/application/services"
+	mdc "github.com/anaknegeri/agent-session/internal/infrastructure/context"
+	gitrunner "github.com/anaknegeri/agent-session/internal/infrastructure/git"
 )
 
 func ProvideInitService(store ports.Store, git ports.GitService, logger *slog.Logger) *app.InitService {

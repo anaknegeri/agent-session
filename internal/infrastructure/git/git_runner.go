@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	domainerr "github.com/agent-session/agent-session/internal/domain/errors"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 )
 
 type runner struct{}

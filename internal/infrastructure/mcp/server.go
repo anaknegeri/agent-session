@@ -11,7 +11,7 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/agent-session/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
 )
 
 const (

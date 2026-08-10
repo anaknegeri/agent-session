@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	app "github.com/agent-session/agent-session/internal/application/services"
-	"github.com/agent-session/agent-session/internal/infrastructure/database"
-	"github.com/agent-session/agent-session/internal/wire"
-	"github.com/agent-session/agent-session/pkg/logger"
+	app "github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/database"
+	"github.com/anaknegeri/agent-session/internal/wire"
+	"github.com/anaknegeri/agent-session/pkg/logger"
 )
 
 type fixture struct {

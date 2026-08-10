@@ -1,7 +1,7 @@
 package ports
 
 import (
-	"github.com/agent-session/agent-session/internal/domain/repositories"
+	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 )
 
 // Store abstracts the persistence layer (PRD §17). SQLiteStore today,

@@ -3,8 +3,8 @@ package database
 import (
 	"fmt"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	"github.com/agent-session/agent-session/internal/infrastructure/database/store"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/database/store"
 )
 
 // OpenStore opens and migrates a SQLite database at path, returning a ports.Store.

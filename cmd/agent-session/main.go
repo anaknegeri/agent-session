@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/agent-session/agent-session/cli"
+	"github.com/anaknegeri/agent-session/cli"
 )
 
 func main() {

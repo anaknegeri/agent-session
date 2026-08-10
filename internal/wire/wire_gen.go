@@ -7,9 +7,9 @@
 package wire
 
 import (
-	"github.com/agent-session/agent-session/internal/application/ports"
-	"github.com/agent-session/agent-session/internal/application/services"
-	"github.com/agent-session/agent-session/internal/providers"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/providers"
 	"github.com/google/wire"
 	"log/slog"
 )

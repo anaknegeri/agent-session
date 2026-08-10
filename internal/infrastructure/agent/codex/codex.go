@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/agent-session/agent-session/internal/infrastructure/agent"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 // Adapter configures OpenAI Codex via `codex mcp add`, falling back to

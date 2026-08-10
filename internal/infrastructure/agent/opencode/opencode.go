@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/agent-session/agent-session/internal/infrastructure/agent"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 // Adapter configures OpenCode via project-level opencode.json.

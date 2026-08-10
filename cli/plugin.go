@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-session/agent-session/internal/infrastructure/agent/claude"
-	"github.com/agent-session/agent-session/internal/infrastructure/agent/codex"
-	"github.com/agent-session/agent-session/internal/infrastructure/agent/opencode"
-	"github.com/agent-session/agent-session/internal/infrastructure/agent/plugin"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/plugin"
 )
 
 func newPluginCmd() *cobra.Command {

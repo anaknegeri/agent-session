@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/agent-session/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 type renderer struct{}

@@ -6,10 +6,10 @@ import (
 	"net"
 	"os"
 
-	"github.com/agent-session/agent-session/internal/bootstrap"
-	"github.com/agent-session/agent-session/internal/infrastructure/mcp"
-	"github.com/agent-session/agent-session/pkg/logger"
-	"github.com/agent-session/agent-session/pkg/port"
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
+	"github.com/anaknegeri/agent-session/pkg/logger"
+	"github.com/anaknegeri/agent-session/pkg/port"
 )
 
 func main() {

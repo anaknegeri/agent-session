@@ -3,7 +3,7 @@ package repositories
 import (
 	"context"
 
-	"github.com/agent-session/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 type ProjectRepository interface {

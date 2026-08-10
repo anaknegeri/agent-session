@@ -6,11 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	app "github.com/agent-session/agent-session/internal/application/services"
-	"github.com/agent-session/agent-session/internal/config"
-	"github.com/agent-session/agent-session/internal/infrastructure/database"
-	"github.com/agent-session/agent-session/internal/wire"
-	"github.com/agent-session/agent-session/pkg/logger"
+	app "github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/config"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/database"
+	"github.com/anaknegeri/agent-session/internal/wire"
+	"github.com/anaknegeri/agent-session/pkg/logger"
 )
 
 // App binds the wired services with the project root that owns the store.

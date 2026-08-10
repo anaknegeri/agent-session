@@ -4,9 +4,9 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	"github.com/agent-session/agent-session/internal/domain/entities"
-	"github.com/agent-session/agent-session/pkg/ids"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
 type HandoffService struct {

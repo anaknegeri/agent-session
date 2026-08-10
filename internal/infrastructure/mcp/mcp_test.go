@@ -11,9 +11,9 @@ import (
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
 
-	"github.com/agent-session/agent-session/internal/bootstrap"
-	agentsession "github.com/agent-session/agent-session/internal/infrastructure/mcp"
-	"github.com/agent-session/agent-session/pkg/logger"
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	agentsession "github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
+	"github.com/anaknegeri/agent-session/pkg/logger"
 )
 
 func setupMCP(t *testing.T) (*client.Client, *bootstrap.App) {

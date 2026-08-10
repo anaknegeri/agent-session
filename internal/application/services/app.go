@@ -3,7 +3,7 @@ package services
 import (
 	"context"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
 )
 
 // App bundles all application services for entrypoints (CLI, MCP).

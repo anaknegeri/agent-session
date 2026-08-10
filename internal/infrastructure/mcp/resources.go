@@ -8,7 +8,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
-	"github.com/agent-session/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 // registerResources exposes read-only MCP resources (PRD §19).

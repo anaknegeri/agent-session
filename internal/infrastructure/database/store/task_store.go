@@ -7,9 +7,9 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/agent-session/agent-session/internal/domain/entities"
-	domainerr "github.com/agent-session/agent-session/internal/domain/errors"
-	"github.com/agent-session/agent-session/internal/domain/repositories"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
+	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 )
 
 type taskStore struct {

@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/agent-session/agent-session/internal/bootstrap"
-	"github.com/agent-session/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 func newStatusCmd() *cobra.Command {

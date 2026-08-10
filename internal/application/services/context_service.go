@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	"github.com/agent-session/agent-session/internal/config"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/config"
 )
 
 const (

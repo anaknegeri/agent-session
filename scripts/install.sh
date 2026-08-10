@@ -6,7 +6,7 @@ set -euo pipefail
 # Env overrides: AS_VERSION, AS_BASE_URL, AS_INSTALL_DIR
 
 AS_VERSION="${AS_VERSION:-0.1.0}"
-AS_BASE_URL="${AS_BASE_URL:-https://github.com/agent-session/agent-session/releases/download/v${AS_VERSION}}"
+AS_BASE_URL="${AS_BASE_URL:-https://github.com/anaknegeri/agent-session/releases/download/v${AS_VERSION}}"
 AS_INSTALL_DIR="${AS_INSTALL_DIR:-/usr/local/bin}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"

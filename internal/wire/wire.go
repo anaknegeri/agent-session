@@ -8,9 +8,9 @@ import (
 
 	"github.com/google/wire"
 
-	"github.com/agent-session/agent-session/internal/application/ports"
-	app "github.com/agent-session/agent-session/internal/application/services"
-	"github.com/agent-session/agent-session/internal/providers"
+	"github.com/anaknegeri/agent-session/internal/application/ports"
+	app "github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/providers"
 )
 
 var appSet = wire.NewSet(

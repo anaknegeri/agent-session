@@ -6,8 +6,8 @@ import (
 
 	"gorm.io/gorm"
 
-	"github.com/agent-session/agent-session/internal/domain/entities"
-	"github.com/agent-session/agent-session/internal/domain/repositories"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 )
 
 type decisionStore struct {
