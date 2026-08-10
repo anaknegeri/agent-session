@@ -19,6 +19,7 @@ layer**: agents are interchangeable workers, and the session is the portable sta
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
 - **Checkpoint & handoff** — snapshot the work, hand it to another agent deterministically.
 - **Always available** — agents spawn the stdio MCP server on demand; optional user-scope registration.
+- **Long-term memory** — knowledge store with SQLite FTS5 full-text search; auto-extracts decisions, resolved blockers and completed tasks from sessions (non-LLM).
 - **Agent Plugin packaging** — ships as a portable plugin (agent-plugins.org v1.0.0).
 
 ---
@@ -90,6 +91,10 @@ agent-session context              # print context.md
 | `agent-session plugin install <agent>` | Wire an agent (`--scope project|user` for claude) |
 | `agent-session plugin uninstall <agent>` | Remove the wiring |
 | `agent-session setup` | Wire every agent + AGENTS.md for always-on behavior (`--only`) |
+| `agent-session memory put <content>` | Store knowledge (`-k kind`) |
+| `agent-session memory list` | List knowledge (`-k kind`, `-n limit`) |
+| `agent-session memory search <query>` | Full-text search knowledge |
+| `agent-session memory promote` | Promote session decisions/blockers/tasks into memory |
 
 ---
 
@@ -152,12 +157,13 @@ return `project not initialized, run agent-session init` instead of a connection
 `session.get`, `session.checkpoint`, `session.resume`, `context.get`, `context.update`,
 `task.create`, `task.get`, `task.update`, `decision.list`, `decision.create`,
 `blocker.create`, `blocker.list`, `blocker.resolve`, `event.append`,
-`workspace.status`, `workspace.diff`
+`workspace.status`, `workspace.diff`,
+`memory.put`, `memory.get`, `memory.search`, `memory.delete`, `memory.promote`
 
 ### Resources
 
 `session://current`, `session://context`, `session://decisions`, `session://tasks`,
-`session://workspace`, `session://checkpoint/latest`
+`session://workspace`, `session://checkpoint/latest`, `memory://recent`
 
 ### Canonical events
 
@@ -166,6 +172,17 @@ return `project not initialized, run agent-session init` instead of a connection
 `checkpoint.created`, `handoff.created`, `session.completed`
 
 Large event payloads (>8KB) are stored as artifacts and referenced by `artifact_id`.
+
+### Long-term memory (Phase 4)
+
+Memory is separate from session state (PRD §26). The `knowledge` table is a
+long-term store with SQLite FTS5 (porter tokenizer) full-text search:
+
+- **Kinds** — `project_knowledge`, `architecture`, `solution`, `preference`, `skill`
+- **Manual** — `memory.put` by the agent or `agent-session memory put`
+- **Auto-promote** (non-LLM) — `memory.promote` extracts structured session state:
+  `decision → architecture`, `resolved blocker → project_knowledge`, `completed task → solution`.
+  Idempotent — already-promoted entities are skipped.
 
 ---
 
@@ -209,7 +226,7 @@ project/
     ├── config.toml           # configuration
     ├── session.db            # SQLite: projects, sessions, tasks, decisions,
     │                         #   blockers, session_events, checkpoints,
-    │                         #   agent_sessions, artifacts
+    │                         #   agent_sessions, artifacts, knowledge (+FTS)
     └── context/
         └── current.md        # human-readable current state (re-generated)
 ```
@@ -251,11 +268,15 @@ checkpoints, context generation, MCP server, Claude/Codex/OpenCode adapters,
 handoff, resume, CLI, local-only, Agent Plugin packaging, auto-checkpoint,
 always-on setup.
 
+**Phase 4 (implemented):** long-term memory — knowledge store with SQLite FTS5
+search, manual `memory.put`, and non-LLM auto-promote of decisions / resolved
+blockers / completed tasks into `architecture` / `project_knowledge` / `solution`.
+
 **Phase 2:** cloud sync, multi-device, PostgreSQL, team sessions, web dashboard.
 
 **Phase 3:** LLM-based context summarization (state stays the source of truth).
 
-**Phase 4:** long-term memory — project knowledge, architecture, reusable solutions.
+**Phase 4 remaining (optional):** vector search (needs embeddings), knowledge graph.
 
 ---
 

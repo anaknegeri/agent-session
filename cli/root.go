@@ -31,6 +31,7 @@ func NewRootCmd() *cobra.Command {
 		newMCPCmd(),
 		newPluginCmd(),
 		newSetupCmd(),
+		newMemoryCmd(),
 	)
 	return root
 }

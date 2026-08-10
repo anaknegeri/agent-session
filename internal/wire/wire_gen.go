@@ -30,10 +30,11 @@ func InitializeApp(store ports.Store, logger *slog.Logger) (*services.App, error
 	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer)
 	handoffService := providers.ProvideHandoffService(store, checkpointService, contextRenderer, logger)
 	artifactService := providers.ProvideArtifactService(store)
-	app := providers.ProvideApp(initService, sessionService, taskService, decisionService, eventService, workspaceService, checkpointService, contextService, handoffService, artifactService, store)
+	memoryService := providers.ProvideMemoryService(store, logger)
+	app := providers.ProvideApp(initService, sessionService, taskService, decisionService, eventService, workspaceService, checkpointService, contextService, handoffService, artifactService, memoryService, store)
 	return app, nil
 }
 
 // wire.go:
 
-var appSet = wire.NewSet(providers.ProvideInitService, providers.ProvideSessionService, providers.ProvideTaskService, providers.ProvideDecisionService, providers.ProvideEventService, providers.ProvideWorkspaceService, providers.ProvideCheckpointService, providers.ProvideContextService, providers.ProvideHandoffService, providers.ProvideArtifactService, providers.ProvideRenderer, providers.ProvideGitService, providers.ProvideApp)
+var appSet = wire.NewSet(providers.ProvideInitService, providers.ProvideSessionService, providers.ProvideTaskService, providers.ProvideDecisionService, providers.ProvideEventService, providers.ProvideWorkspaceService, providers.ProvideCheckpointService, providers.ProvideContextService, providers.ProvideHandoffService, providers.ProvideArtifactService, providers.ProvideMemoryService, providers.ProvideRenderer, providers.ProvideGitService, providers.ProvideApp)

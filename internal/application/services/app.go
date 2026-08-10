@@ -18,6 +18,7 @@ type App struct {
 	Context    *ContextService
 	Handoff    *HandoffService
 	Artifact   *ArtifactService
+	Memory     *MemoryService
 	Store      ports.Store
 }
 

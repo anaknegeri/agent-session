@@ -62,6 +62,19 @@ func (s *Server) registerResources() {
 		sessionResource(s, func(ctx context.Context, sessionID string) (any, error) {
 			return s.app.Checkpoint.Latest(ctx, sessionID)
 		}))
+
+	resource("memory://recent", "Recent knowledge",
+		"Recent long-term memory entries",
+		func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			if err := s.ready(); err != nil {
+				return nil, err
+			}
+			rows, err := s.app.Memory.ListByKind(ctx, "", 10)
+			if err != nil {
+				return nil, err
+			}
+			return resourceText(rows)
+		})
 }
 
 // sessionResource resolves the current session and delegates to fn.

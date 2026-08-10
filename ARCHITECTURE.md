@@ -301,6 +301,7 @@ Storage dibuat mengikuti PRD §17: `Store` interface + `SQLiteStore` (PostgresSt
 |---|---|---|
 | `SessionService` | create/resume/status/handoff/lifecycle, atur `last_agent`, buka+tutup `agent_sessions` | `session.get`, `session.resume`, CLI `start/resume/status` |
 | `CheckpointService` | buat snapshot canonical (PRD §15), simpan `checkpoints`, auto-checkpoint, restore | `session.checkpoint`, CLI `checkpoint` |
+| `MemoryService` | put/get/search/delete knowledge (FTS5) + promote non-LLM dari decision/blocker/task | `memory.*`, CLI `memory` |
 | `EventService` | append `session_events` (canonical event §14.3), query recent | `event.append`, CLI `history` |
 | `TaskService` | create/update task, set `current_task_id` | `task.get`, `task.update` |
 | `DecisionService` | list/create decision + blocker | `decision.list`, `decision.create` |
@@ -356,6 +357,11 @@ Bootstrap via `cmd/agent-session-mcp`: deteksi transport dari env `--transport s
 | `event.append` | `type`, `payload?` (payload besar → artifact) |
 | `workspace.status` | — |
 | `workspace.diff` | `scope?` (stat/full) |
+| `memory.put` | `kind`, `content` (project_knowledge/architecture/solution/preference/skill) |
+| `memory.get` | `memory_id` |
+| `memory.search` | `query`, `limit?` (FTS5, porter tokenizer) |
+| `memory.delete` | `memory_id` |
+| `memory.promote` | extract decision→architecture, blocker resolved→project_knowledge, task completed→solution |
 
 Auto-checkpoint (config `[session] auto_checkpoint = true`, default on) dibuat setelah `task.create`, `task.update`, `decision.create`, dan `test.passed` (PRD §23).
 

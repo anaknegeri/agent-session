@@ -16,5 +16,6 @@ type Store interface {
 	Checkpoints() repositories.CheckpointRepository
 	AgentSessions() repositories.AgentSessionRepository
 	Artifacts() repositories.ArtifactRepository
+	Knowledge() repositories.KnowledgeRepository
 	Close() error
 }

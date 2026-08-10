@@ -94,3 +94,23 @@ CREATE TABLE IF NOT EXISTS artifacts (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id, created_at);
+
+CREATE TABLE IF NOT EXISTS knowledge (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT,
+    kind        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    source_type TEXT,
+    source_id   TEXT,
+    agent       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+CREATE INDEX IF NOT EXISTS idx_knowledge_kind ON knowledge(kind, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_source ON knowledge(source_type, source_id) WHERE source_id IS NOT NULL AND source_id != '';
+
+CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_fts USING fts5(
+    content,
+    id UNINDEXED,
+    kind UNINDEXED,
+    tokenize = 'porter unicode61'
+);

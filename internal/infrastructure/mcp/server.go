@@ -122,3 +122,22 @@ func argString(args map[string]any, key string) string {
 		return fmt.Sprintf("%v", t)
 	}
 }
+
+func intArg(args map[string]any, key string) int {
+	v, ok := args[key]
+	if !ok {
+		return 0
+	}
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case json.RawMessage:
+		var f float64
+		if json.Unmarshal(t, &f) == nil {
+			return int(f)
+		}
+	}
+	return 0
+}

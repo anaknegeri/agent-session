@@ -20,6 +20,7 @@ type sqliteStore struct {
 	checkpoints   repositories.CheckpointRepository
 	agentSessions repositories.AgentSessionRepository
 	artifacts     repositories.ArtifactRepository
+	knowledge     repositories.KnowledgeRepository
 }
 
 func NewSQLiteStore(db *gorm.DB) (*sqliteStore, error) {
@@ -33,6 +34,7 @@ func NewSQLiteStore(db *gorm.DB) (*sqliteStore, error) {
 	s.checkpoints = &checkpointStore{db: db}
 	s.agentSessions = &agentSessionStore{db: db}
 	s.artifacts = &artifactStore{db: db}
+	s.knowledge = &knowledgeStore{db: db}
 	return s, nil
 }
 
@@ -45,6 +47,7 @@ func (s *sqliteStore) Events() repositories.EventRepository               { retu
 func (s *sqliteStore) Checkpoints() repositories.CheckpointRepository     { return s.checkpoints }
 func (s *sqliteStore) AgentSessions() repositories.AgentSessionRepository { return s.agentSessions }
 func (s *sqliteStore) Artifacts() repositories.ArtifactRepository         { return s.artifacts }
+func (s *sqliteStore) Knowledge() repositories.KnowledgeRepository        { return s.knowledge }
 
 func (s *sqliteStore) Close() error {
 	sqlDB, err := s.db.DB()

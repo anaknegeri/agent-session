@@ -183,15 +183,48 @@ func TestMCPTaskAndBlockerTools(t *testing.T) {
 	}
 }
 
-func extractID(t *testing.T, text string) string {
+func TestMCPMemoryTools(t *testing.T) {
+	c, _ := setupMCP(t)
+
+	res := call(t, c, "memory.put", map[string]any{
+		"kind":    "architecture",
+		"content": "Use rotating refresh tokens to prevent replay",
+	})
+	if !strings.Contains(res, "mem_") {
+		t.Fatalf("memory.put unexpected: %s", res)
+	}
+	memID := extractIDLike(t, res, "mem_")
+
+	res = call(t, c, "memory.search", map[string]any{"query": "refresh token"})
+	if !strings.Contains(res, "rotating") {
+		t.Fatalf("memory.search unexpected: %s", res)
+	}
+
+	res = call(t, c, "memory.get", map[string]any{"memory_id": memID})
+	if !strings.Contains(res, "refresh") {
+		t.Fatalf("memory.get unexpected: %s", res)
+	}
+
+	res = call(t, c, "memory.delete", map[string]any{"memory_id": memID})
+	if !strings.Contains(res, "deleted") {
+		t.Fatalf("memory.delete unexpected: %s", res)
+	}
+}
+
+func extractIDLike(t *testing.T, text, prefix string) string {
 	t.Helper()
-	start := strings.Index(text, "task_")
+	start := strings.Index(text, prefix)
 	if start < 0 {
-		t.Fatalf("no task id in %s", text)
+		t.Fatalf("no id %q in %s", prefix, text)
 	}
 	end := start
-	for end < len(text) && (text[end] != '"' && text[end] != '\\' && text[end] != '}') {
+	for end < len(text) && text[end] != '"' && text[end] != '\\' && text[end] != '}' {
 		end++
 	}
 	return text[start:end]
+}
+
+func extractID(t *testing.T, text string) string {
+	t.Helper()
+	return extractIDLike(t, text, "task_")
 }

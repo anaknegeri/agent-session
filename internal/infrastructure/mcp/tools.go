@@ -264,6 +264,67 @@ func (s *Server) registerTools() {
 			},
 		},
 		{
+			name: "memory.put",
+			desc: "Store a piece of long-term knowledge (kind: project_knowledge, architecture, solution, preference, skill).",
+			options: []mcp.ToolOption{
+				mcp.WithString("kind", mcp.Description("project_knowledge|architecture|solution|preference|skill"), mcp.Required()),
+				mcp.WithString("content", mcp.Description("The knowledge to remember"), mcp.Required()),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, _ := s.currentSession(ctx)
+				return s.app.Memory.Put(ctx, sessionID, argString(args, "kind"), argString(args, "content"), s.agent())
+			},
+		},
+		{
+			name: "memory.get",
+			desc: "Get a knowledge entry by ID.",
+			options: []mcp.ToolOption{
+				mcp.WithString("memory_id", mcp.Description("Knowledge ID"), mcp.Required()),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				return s.app.Memory.Get(ctx, argString(args, "memory_id"))
+			},
+		},
+		{
+			name: "memory.search",
+			desc: "Full-text search the knowledge store.",
+			options: []mcp.ToolOption{
+				mcp.WithString("query", mcp.Description("Search query"), mcp.Required()),
+				mcp.WithNumber("limit", mcp.Description("Max results")),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				return s.app.Memory.Search(ctx, argString(args, "query"), intArg(args, "limit"))
+			},
+		},
+		{
+			name: "memory.delete",
+			desc: "Delete a knowledge entry by ID.",
+			options: []mcp.ToolOption{
+				mcp.WithString("memory_id", mcp.Description("Knowledge ID"), mcp.Required()),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				if err := s.app.Memory.Delete(ctx, argString(args, "memory_id")); err != nil {
+					return nil, err
+				}
+				return map[string]string{"status": "deleted"}, nil
+			},
+		},
+		{
+			name: "memory.promote",
+			desc: "Promote session decisions, resolved blockers and completed tasks into long-term memory.",
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := s.currentSession(ctx)
+				if err != nil {
+					return nil, err
+				}
+				count, err := s.app.Memory.Promote(ctx, sessionID, s.agent())
+				if err != nil {
+					return nil, err
+				}
+				return map[string]any{"promoted": count}, nil
+			},
+		},
+		{
 			name: "workspace.status",
 			desc: "Get git workspace status (branch, commit, dirty, changes).",
 			run: func(ctx context.Context, args map[string]any) (any, error) {
