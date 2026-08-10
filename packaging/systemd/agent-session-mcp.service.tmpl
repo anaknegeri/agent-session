@@ -1,0 +1,26 @@
+# systemd user service: auto-start agent-session MCP (streamable-http).
+#
+# Install:
+#   mkdir -p ~/.config/systemd/user
+#   cp packaging/systemd/agent-session-mcp.service.tmpl ~/.config/systemd/user/agent-session-mcp.service
+#   # edit WorkingDirectory to a project that has .agent/
+#   systemctl --user enable --now agent-session-mcp
+#   systemctl --user status agent-session-mcp
+#
+# The deterministic port is printed to the journal:
+#   journalctl --user -u agent-session-mcp -f
+# Register a remote MCP server in clients at http://127.0.0.1:PORT/mcp.
+
+[Unit]
+Description=Agent Session MCP server (streamable-http)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/REPLACE_WITH_PATH/agent-session mcp --transport streamable-http --addr auto
+WorkingDirectory=/REPLACE_WITH_PROJECT_DIR
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

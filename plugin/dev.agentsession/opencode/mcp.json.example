@@ -1,0 +1,8 @@
+{
+  "mcp": {
+    "agent-session": {
+      "type": "stdio",
+      "command": ["/path/to/agent-session-mcp"]
+    }
+  }
+}

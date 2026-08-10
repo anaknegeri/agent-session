@@ -1,0 +1,5 @@
+# ~/.codex/config.toml — reference for manual setup
+# Or: codex mcp add agent-session -- /path/to/agent-session-mcp
+
+[mcp_servers.agent-session]
+command = "/path/to/agent-session-mcp"

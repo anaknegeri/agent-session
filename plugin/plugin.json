@@ -1,0 +1,16 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "description": "Universal session \u0026 handoff layer for AI coding agents",
+  "extensions": {
+    "dev.agentsession": {
+      "agent_adapters": [
+        "claude",
+        "codex",
+        "opencode"
+      ]
+    }
+  },
+  "license": "MIT",
+  "name": "agent-session",
+  "version": "0.1.0"
+}

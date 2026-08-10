@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS launchd LaunchAgent: auto-start agent-session MCP (streamable-http).
+     Install:
+       cp packaging/launchd/com.agent-session.mcp.plist.tmpl ~/Library/LaunchAgents/com.agent-session.mcp.plist
+       # edit BINARY_PATH, PROJECT_DIR (a project with .agent), and PORT as needed
+       launchctl load ~/Library/LaunchAgents/com.agent-session.mcp.plist
+     Then register a remote MCP server in your clients pointing at
+     http://127.0.0.1:PORT/mcp  (port: run `agent-session mcp --transport streamable-http` once
+     to see the deterministic port, or set PORT manually).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.agent-session.mcp</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_WITH_BINARY_PATH</string>
+    <string>mcp</string>
+    <string>--transport</string>
+    <string>streamable-http</string>
+    <string>--addr</string>
+    <string>auto</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>REPLACE_WITH_PROJECT_DIR</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/agent-session-mcp.log</string>
+  <key>StandardOutPath</key>
+  <string>/tmp/agent-session-mcp.log</string>
+</dict>
+</plist>

@@ -1,0 +1,17 @@
+# Homebrew formula template for Agent Session (PRD §30: brew install agent-session).
+# Place as Formula/agent-session.rb after the first tagged release.
+class AgentSession < Formula
+  desc "Universal session & handoff layer for AI coding agents"
+  homepage "https://agent-session.dev"
+  url "https://github.com/agent-session/agent-session/releases/download/v0.1.0/agent-session-darwin-arm64"
+  sha256 "REPLACE_WITH_SHA256"
+  license "MIT"
+
+  def install
+    bin.install "agent-session-darwin-arm64" => "agent-session"
+  end
+
+  test do
+    assert_match "agent-session", shell_output("#{bin}/agent-session --help")
+  end
+end
