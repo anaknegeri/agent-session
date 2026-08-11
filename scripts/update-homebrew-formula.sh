@@ -32,7 +32,7 @@ sha256_for() {
 # pre-built package without invoking a compiler.
 bottle_sha256=""
 if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
-  bottle_url="${base}/agent-session--${version}.arm64_golden_gate.bottle.tar.gz"
+  bottle_url="${base}/agent-session-${version}.arm64_golden_gate.bottle.tar.gz"
   if curl -fsSL "${bottle_url}" -o "$tmp/bottle.tar.gz"; then
     bottle_sha256="$(shasum -a 256 "$tmp/bottle.tar.gz" | awk '{print $1}')"
   fi
