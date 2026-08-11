@@ -368,25 +368,6 @@ MCP client tests, and a live end-to-end flow (`init → task → checkpoint → 
 
 ---
 
-## Roadmap
-
-**MVP (implemented):** single binary, SQLite, git detection, sessions, events,
-checkpoints, context generation, MCP server, Claude/Codex/OpenCode adapters,
-handoff, resume, CLI, local-only, Agent Plugin packaging, auto-checkpoint,
-always-on setup.
-
-**Phase 4 (implemented):** long-term memory — knowledge store with SQLite FTS5
-search, manual `memory.put`, and non-LLM auto-promote of decisions / resolved
-blockers / completed tasks into `architecture` / `project_knowledge` / `solution`.
-
-**Phase 2:** cloud sync, multi-device, PostgreSQL, team sessions, web dashboard.
-
-**Phase 3:** LLM-based context summarization (state stays the source of truth).
-
-**Phase 4 remaining (optional):** vector search (needs embeddings), knowledge graph.
-
----
-
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
