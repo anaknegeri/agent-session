@@ -14,13 +14,15 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/pkg/version"
 )
 
 const (
-	serverName    = "agent-session"
-	serverVersion = "0.1.0"
-	DefaultAgent  = "mcp"
+	serverName   = "agent-session"
+	DefaultAgent = "mcp"
 )
+
+var serverVersion = version.Version
 
 type Server struct {
 	root           string

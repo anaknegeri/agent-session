@@ -8,18 +8,20 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/pkg/version"
 )
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "agent-session",
 		Short:         "Universal session & handoff layer for AI coding agents",
-		Version:       "0.1.0",
+		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
 	root.AddCommand(
 		newInitCmd(),
+		newVersionCmd(),
 		newStatusCmd(),
 		newDashboardCmd(),
 		newStatsCmd(),

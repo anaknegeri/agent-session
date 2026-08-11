@@ -10,12 +10,19 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
 	"github.com/anaknegeri/agent-session/pkg/logger"
 	"github.com/anaknegeri/agent-session/pkg/port"
+	"github.com/anaknegeri/agent-session/pkg/version"
 )
 
 func main() {
 	transport := flag.String("transport", "stdio", "stdio | streamable-http")
 	addr := flag.String("addr", "auto", "HTTP listen address (streamable-http). auto picks a unique port per project")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.Full())
+		os.Exit(0)
+	}
 
 	root, err := bootstrap.ResolveRoot(".")
 	if err != nil {
