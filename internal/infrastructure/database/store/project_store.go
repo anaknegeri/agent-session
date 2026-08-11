@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 
 	"gorm.io/gorm"
 
@@ -27,6 +28,20 @@ func (s *projectStore) Create(ctx context.Context, project *entities.Project) er
 }
 
 func (s *projectStore) GetByPath(ctx context.Context, path string) (*entities.Project, error) {
+	p, err := s.getByPathExact(ctx, path)
+	if err == nil || !errors.Is(err, domainerr.ErrProjectNotFound) {
+		return p, err
+	}
+	// Fallback: projects initialized before path canonicalization may be stored
+	// under a symlinked path (e.g. /var vs /private/var on macOS).
+	resolved, rerr := filepath.EvalSymlinks(path)
+	if rerr != nil || resolved == path {
+		return nil, err
+	}
+	return s.getByPathExact(ctx, resolved)
+}
+
+func (s *projectStore) getByPathExact(ctx context.Context, path string) (*entities.Project, error) {
 	var p entities.Project
 	err := s.db.WithContext(ctx).First(&p, "path = ?", path).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {

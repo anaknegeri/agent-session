@@ -28,6 +28,11 @@ func Init(dir, agent string) (*App, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve dir: %w", err)
 	}
+	// Store the canonical path so later lookups (which resolve symlinks, e.g.
+	// /var -> /private/var on macOS) find the project.
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
 
 	if err := os.MkdirAll(filepath.Join(abs, config.DirName), 0o755); err != nil {
 		return nil, fmt.Errorf("create .agent dir: %w", err)
@@ -177,11 +182,15 @@ func ResolveRoot(dir string) (string, error) {
 }
 
 // findRoot walks up from dir until it finds a directory containing .agent/.
-// If none is found the input dir is used.
+// If none is found the input dir is used. The result is symlink-resolved so
+// every entrypoint (CLI, MCP server) agrees on the same canonical path.
 func findRoot(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve dir: %w", err)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
 	}
 	for d := abs; ; d = filepath.Dir(d) {
 		if st, err := os.Stat(filepath.Join(d, config.DirName)); err == nil && st.IsDir() {
