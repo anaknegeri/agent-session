@@ -5,6 +5,7 @@ set -euo pipefail
 # with the current version and SHA256 checksums from local dist binaries.
 #
 # Requires: dist binaries already built (make cross-compile).
+# Works with bash 3.2 (macOS default).
 # After regenerating, publish the formula to your Homebrew tap.
 
 cd "$(dirname "$0")/.."
@@ -19,15 +20,14 @@ sha256_for() {
   shasum -a 256 "dist/$1" 2>/dev/null | awk '{print $1}'
 }
 
-declare -A shas
-shas[darwin_arm64]=$(sha256_for agent-session-darwin-arm64)
-shas[darwin_amd64]=$(sha256_for agent-session-darwin-amd64)
-shas[linux_arm64]=$(sha256_for agent-session-linux-arm64)
-shas[linux_amd64]=$(sha256_for agent-session-linux-amd64)
-shas[mcp_darwin_arm64]=$(sha256_for agent-session-mcp-darwin-arm64)
-shas[mcp_darwin_amd64]=$(sha256_for agent-session-mcp-darwin-amd64)
-shas[mcp_linux_arm64]=$(sha256_for agent-session-mcp-linux-arm64)
-shas[mcp_linux_amd64]=$(sha256_for agent-session-mcp-linux-amd64)
+darwin_arm64=$(sha256_for agent-session-darwin-arm64)
+darwin_amd64=$(sha256_for agent-session-darwin-amd64)
+linux_arm64=$(sha256_for agent-session-linux-arm64)
+linux_amd64=$(sha256_for agent-session-linux-amd64)
+mcp_darwin_arm64=$(sha256_for agent-session-mcp-darwin-arm64)
+mcp_darwin_amd64=$(sha256_for agent-session-mcp-darwin-amd64)
+mcp_linux_arm64=$(sha256_for agent-session-mcp-linux-arm64)
+mcp_linux_amd64=$(sha256_for agent-session-mcp-linux-amd64)
 
 cat > "$dir/agent-session.rb" <<EOF
 # Homebrew formula for Agent Session (macOS + Linux via Linuxbrew).
@@ -42,17 +42,17 @@ class AgentSession < Formula
   on_macos do
     if Hardware::CPU.arm?
       url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-darwin-arm64"
-      sha256 "${shas[darwin_arm64]}"
+      sha256 "${darwin_arm64}"
       resource "mcp" do
         url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-darwin-arm64"
-        sha256 "${shas[mcp_darwin_arm64]}"
+        sha256 "${mcp_darwin_arm64}"
       end
     else
       url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-darwin-amd64"
-      sha256 "${shas[darwin_amd64]}"
+      sha256 "${darwin_amd64}"
       resource "mcp" do
         url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-darwin-amd64"
-        sha256 "${shas[mcp_darwin_amd64]}"
+        sha256 "${mcp_darwin_amd64}"
       end
     end
   end
@@ -60,17 +60,17 @@ class AgentSession < Formula
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-linux-arm64"
-      sha256 "${shas[linux_arm64]}"
+      sha256 "${linux_arm64}"
       resource "mcp" do
         url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-linux-arm64"
-        sha256 "${shas[mcp_linux_arm64]}"
+        sha256 "${mcp_linux_arm64}"
       end
     else
       url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-linux-amd64"
-      sha256 "${shas[linux_amd64]}"
+      sha256 "${linux_amd64}"
       resource "mcp" do
         url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-linux-amd64"
-        sha256 "${shas[mcp_linux_amd64]}"
+        sha256 "${mcp_linux_amd64}"
       end
     end
   end

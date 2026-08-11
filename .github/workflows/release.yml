@@ -25,16 +25,21 @@ jobs:
 
       - name: Build
         run: |
-          out="agent-session-${{ matrix.os }}-${{ matrix.arch }}"
-          [ "${{ matrix.os }}" = "windows" ] && out="${out}.exe"
-          CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-            go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/agent-session
-          echo "artifact=$out" >> "$GITHUB_ENV"
+          ext=""
+          [ "${{ matrix.os }}" = "windows" ] && ext=".exe"
+          for bin in agent-session agent-session-mcp; do
+            out="${bin}-${{ matrix.os }}-${{ matrix.arch }}${ext}"
+            CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
+              go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/${bin}
+          done
+          echo "built for ${{ matrix.os }}/${{ matrix.arch }}"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.artifact }}
-          path: ${{ env.artifact }}
+          name: ${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            agent-session-${{ matrix.os }}-${{ matrix.arch }}*
+            agent-session-mcp-${{ matrix.os }}-${{ matrix.arch }}*
 
   release:
     needs: build
