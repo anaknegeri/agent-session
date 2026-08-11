@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -21,40 +22,44 @@ const (
 )
 
 type Server struct {
-	app      *bootstrap.App
-	notReady error // when set, every tool/resource returns this error
-	logger   *slog.Logger
-	mcp      *server.MCPServer
+	root   string // directory used to resolve the project (.agent)
+	mu     sync.Mutex
+	app    *bootstrap.App // lazily opened and cached
+	logger *slog.Logger
+	mcp    *server.MCPServer
 }
 
-func New(app *bootstrap.App, logger *slog.Logger) *Server {
-	s := &Server{app: app, logger: logger}
+// New builds a server rooted at root. The project may not be initialized yet:
+// the first tool/resource call resolves it lazily, so a server started before
+// `agent-session init` starts working as soon as init completes.
+func New(root string, logger *slog.Logger) *Server {
+	s := &Server{root: root, logger: logger}
 	s.mcp = server.NewMCPServer(serverName, serverVersion, server.WithLogging())
 	s.registerTools()
 	s.registerResources()
 	return s
 }
 
-// NewNotReady builds a server that stays connected but answers every tool and
-// resource call with err. Used for user-scoped servers spawned in projects that
-// have not been initialized yet, so the client never sees "connection failed".
-func NewNotReady(err error, logger *slog.Logger) *Server {
-	s := &Server{notReady: err, logger: logger}
-	s.mcp = server.NewMCPServer(serverName, serverVersion, server.WithLogging())
-	s.registerTools()
-	s.registerResources()
-	return s
+// getApp lazily opens the project app, caching it once successful. Each call
+// re-attempts until init exists, so an "always-on" server recovers on its own.
+func (s *Server) getApp() (*bootstrap.App, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.app != nil {
+		return s.app, nil
+	}
+	app, err := bootstrap.Open(s.root)
+	if err != nil {
+		return nil, err
+	}
+	s.app = app
+	return s.app, nil
 }
 
-// ready reports whether the app is usable; notReady is prioritized.
+// ready reports whether the project app is usable.
 func (s *Server) ready() error {
-	if s.notReady != nil {
-		return s.notReady
-	}
-	if s.app == nil {
-		return fmt.Errorf("agent-session server is not ready")
-	}
-	return nil
+	_, err := s.getApp()
+	return err
 }
 
 // MCPServer exposes the underlying server (for tests / in-process clients).
@@ -75,11 +80,15 @@ func (s *Server) ServeStreamableHTTP(ln net.Listener) error {
 
 // currentSession resolves the active session for the project root.
 func (s *Server) currentSession(ctx context.Context) (string, error) {
-	projectID, err := s.app.ResolveProjectID(ctx, s.app.Root)
+	app, err := s.getApp()
 	if err != nil {
 		return "", err
 	}
-	session, err := s.app.Session.GetActive(ctx, projectID)
+	projectID, err := app.ResolveProjectID(ctx, app.Root)
+	if err != nil {
+		return "", err
+	}
+	session, err := app.Session.GetActive(ctx, projectID)
 	if err != nil {
 		return "", err
 	}
@@ -97,10 +106,14 @@ func (s *Server) agent() string {
 // maybeCheckpoint auto-creates a checkpoint when auto_checkpoint is enabled
 // (PRD §23 automatic: task completed, test completed, major decision).
 func (s *Server) maybeCheckpoint(ctx context.Context, sessionID, reason string) error {
-	if s.app.Cfg == nil || !s.app.Cfg.Session.AutoCheckpoint {
+	app, err := s.getApp()
+	if err != nil {
+		return err
+	}
+	if app.Cfg == nil || !app.Cfg.Session.AutoCheckpoint {
 		return nil
 	}
-	_, err := s.app.Checkpoint.Create(ctx, sessionID, reason, "", s.agent())
+	_, err = app.Checkpoint.Create(ctx, sessionID, reason, "", s.agent())
 	return err
 }
 

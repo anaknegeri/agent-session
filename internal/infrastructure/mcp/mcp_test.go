@@ -25,7 +25,7 @@ func setupMCP(t *testing.T) (*client.Client, *bootstrap.App) {
 		t.Fatal(err)
 	}
 
-	server := agentsession.New(app, logger.New("error"))
+	server := agentsession.New(dir, logger.New("error"))
 	c, err := client.NewInProcessClient(server.MCPServer())
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +49,19 @@ func call(t *testing.T, c *client.Client, name string, args map[string]any) stri
 	}
 	if res.IsError {
 		t.Fatalf("call %s returned error: %v", name, res.Content)
+	}
+	return toolText(res)
+}
+
+// callAny returns the tool output even when the tool signals an error.
+func callAny(t *testing.T, c *client.Client, name string, args map[string]any) string {
+	t.Helper()
+	req := mcp.CallToolRequest{}
+	req.Params.Name = name
+	req.Params.Arguments = args
+	res, err := c.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("call %s: %v", name, err)
 	}
 	return toolText(res)
 }
@@ -208,6 +221,38 @@ func TestMCPMemoryTools(t *testing.T) {
 	res = call(t, c, "memory.delete", map[string]any{"memory_id": memID})
 	if !strings.Contains(res, "deleted") {
 		t.Fatalf("memory.delete unexpected: %s", res)
+	}
+}
+
+func TestMCPLazyInitAfterInit(t *testing.T) {
+	// server starts before the project is initialized; it must recover once
+	// agent-session init completes (always-on user-scope scenario).
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	server := agentsession.New(dir, logger.New("error"))
+	c, err := client.NewInProcessClient(server.MCPServer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	if _, err := c.Initialize(context.Background(), mcp.InitializeRequest{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// before init: tool returns the not-initialized message, still connected
+	res := callAny(t, c, "session.get", nil)
+	if !strings.Contains(res, "not initialized") {
+		t.Fatalf("expected not initialized, got: %s", res)
+	}
+
+	// init the project, then the same server instance must work
+	if _, err := bootstrap.Init(dir, "claude"); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	res = call(t, c, "session.get", nil)
+	if !strings.Contains(res, "sess_") {
+		t.Fatalf("expected session after init, got: %s", res)
 	}
 }
 

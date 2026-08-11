@@ -133,6 +133,13 @@ func gitInitReminder() string {
 		"then re-run `agent-session init`. Session works in local-only mode meanwhile."
 }
 
+// ResolveRoot returns the project root for dir, walking up to the nearest
+// directory containing .agent/ (or dir itself when none exists). It does not
+// require the project to be initialized yet.
+func ResolveRoot(dir string) (string, error) {
+	return findRoot(dir)
+}
+
 // findRoot walks up from dir until it finds a directory containing .agent/.
 // If none is found the input dir is used.
 func findRoot(dir string) (string, error) {

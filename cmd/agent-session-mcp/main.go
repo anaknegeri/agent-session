@@ -17,13 +17,12 @@ func main() {
 	addr := flag.String("addr", "auto", "HTTP listen address (streamable-http). auto picks a unique port per project")
 	flag.Parse()
 
-	app, err := bootstrap.Open(".")
-	var server *mcp.Server
+	root, err := bootstrap.ResolveRoot(".")
 	if err != nil {
-		server = mcp.NewNotReady(err, logger.New("info"))
-	} else {
-		server = mcp.New(app, logger.New("info"))
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
 	}
+	server := mcp.New(root, logger.New("info"))
 	switch *transport {
 	case "stdio":
 		if err := server.ServeStdio(); err != nil {
@@ -32,10 +31,6 @@ func main() {
 		}
 	case "streamable-http":
 		if *addr == "auto" {
-			root := "."
-			if app != nil {
-				root = app.Root
-			}
 			ln, p, err := port.Listen(root, port.DefaultBase, port.DefaultSpan)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "Error:", err)

@@ -47,10 +47,11 @@ func (s *Server) registerResources() {
 	resource("session://workspace", "Workspace",
 		"Git workspace status",
 		func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			if err := s.ready(); err != nil {
+			app, err := s.getApp()
+			if err != nil {
 				return nil, err
 			}
-			data, err := s.app.Workspace.Status(ctx, s.app.Root)
+			data, err := app.Workspace.Status(ctx, app.Root)
 			if err != nil {
 				return nil, err
 			}
@@ -66,10 +67,11 @@ func (s *Server) registerResources() {
 	resource("memory://recent", "Recent knowledge",
 		"Recent long-term memory entries",
 		func(ctx context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-			if err := s.ready(); err != nil {
+			app, err := s.getApp()
+			if err != nil {
 				return nil, err
 			}
-			rows, err := s.app.Memory.ListByKind(ctx, "", 10)
+			rows, err := app.Memory.ListByKind(ctx, "", 10)
 			if err != nil {
 				return nil, err
 			}

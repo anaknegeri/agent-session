@@ -59,22 +59,16 @@ func newMCPCmd() *cobra.Command {
 		Short: "Run the MCP server (stdio or streamable-http)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			app, err := bootstrap.Open(".")
-			var server *mcp.Server
+			root, err := bootstrap.ResolveRoot(".")
 			if err != nil {
-				server = mcp.NewNotReady(err, logger.New("info"))
-			} else {
-				server = mcp.New(app, logger.New("info"))
+				return err
 			}
+			server := mcp.New(root, logger.New("info"))
 			switch transport {
 			case "stdio", "":
 				return server.ServeStdio()
 			case "streamable-http":
 				if addr == "auto" {
-					root := "."
-					if app != nil {
-						root = app.Root
-					}
 					ln, p, err := port.Listen(root, port.DefaultBase, port.DefaultSpan)
 					if err != nil {
 						return err
