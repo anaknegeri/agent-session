@@ -46,9 +46,12 @@ func (r *runner) Status(ctx context.Context, dir string) (ports.WorkspaceStatus,
 }
 
 func (r *runner) DiffStat(ctx context.Context, dir string) ([]ports.FileChange, error) {
-	out, err := r.run(ctx, dir, "diff", "--name-status")
+	if !r.hasHead(ctx, dir) {
+		return nil, nil
+	}
+	out, err := r.run(ctx, dir, "diff", "HEAD", "--name-status")
 	if err != nil {
-		return nil, fmt.Errorf("git diff --name-status: %w", err)
+		return nil, fmt.Errorf("git diff HEAD --name-status: %w", err)
 	}
 
 	var changes []ports.FileChange
@@ -67,11 +70,20 @@ func (r *runner) DiffStat(ctx context.Context, dir string) ([]ports.FileChange, 
 }
 
 func (r *runner) Diff(ctx context.Context, dir string) (string, error) {
-	out, err := r.run(ctx, dir, "diff")
+	if !r.hasHead(ctx, dir) {
+		return "", nil
+	}
+	out, err := r.run(ctx, dir, "diff", "HEAD")
 	if err != nil {
-		return "", fmt.Errorf("git diff: %w", err)
+		return "", fmt.Errorf("git diff HEAD: %w", err)
 	}
 	return out, nil
+}
+
+// hasHead reports whether the repository has a commit to diff against.
+func (r *runner) hasHead(ctx context.Context, dir string) bool {
+	_, err := r.run(ctx, dir, "rev-parse", "--verify", "--quiet", "HEAD")
+	return err == nil
 }
 
 func (r *runner) run(ctx context.Context, dir string, args ...string) (string, error) {
