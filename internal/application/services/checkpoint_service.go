@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
@@ -157,7 +158,9 @@ func (s *CheckpointService) testsState(ctx context.Context, sessionID string) en
 		switch e.Type {
 		case entities.EventTestFailed:
 			failed++
-			state.Status = "failed"
+			if state.Status == "unknown" {
+				state.Status = "failed"
+			}
 		case entities.EventTestPassed:
 			if state.Status == "unknown" {
 				state.Status = "passed"
@@ -192,6 +195,135 @@ func taskStatus(t *entities.Task) string {
 // Latest returns the most recent checkpoint for a session.
 func (s *CheckpointService) Latest(ctx context.Context, sessionID string) (*entities.Checkpoint, error) {
 	return s.store.Checkpoints().GetLatest(ctx, sessionID)
+}
+
+// GetByID returns a checkpoint by ID.
+func (s *CheckpointService) GetByID(ctx context.Context, id string) (*entities.Checkpoint, error) {
+	return s.store.Checkpoints().GetByID(ctx, id)
+}
+
+// ListBySession returns checkpoints for a session, most recent first.
+func (s *CheckpointService) ListBySession(ctx context.Context, sessionID string, limit int) ([]*entities.Checkpoint, error) {
+	return s.store.Checkpoints().ListBySession(ctx, sessionID, limit)
+}
+
+// SnapshotDiff captures what changed between two checkpoints.
+type SnapshotDiff struct {
+	Before           *entities.Checkpoint `json:"-"`
+	After            *entities.Checkpoint `json:"-"`
+	TaskTitleChanged bool                 `json:"task_title_changed"`
+	TaskStatusFrom   string               `json:"task_status_from"`
+	TaskStatusTo     string               `json:"task_status_to"`
+	NewDecisions     []*entities.Decision `json:"new_decisions"`
+	NewBlockers      []*entities.Blocker  `json:"new_blockers"`
+	ResolvedBlockers []*entities.Blocker  `json:"resolved_blockers"`
+	NewlyCompleted   []string             `json:"newly_completed"`
+	NewlyStarted     []string             `json:"newly_started"`
+	NewFiles         []string             `json:"new_files"`
+	NextActionFrom   string               `json:"next_action_from"`
+	NextActionTo     string               `json:"next_action_to"`
+	CommitFrom       string               `json:"commit_from"`
+	CommitTo         string               `json:"commit_to"`
+}
+
+// HasChanges reports whether the diff contains any changes.
+func (d *SnapshotDiff) HasChanges() bool {
+	return d.TaskTitleChanged || d.TaskStatusFrom != d.TaskStatusTo ||
+		len(d.NewDecisions) > 0 || len(d.NewBlockers) > 0 || len(d.ResolvedBlockers) > 0 ||
+		len(d.NewlyCompleted) > 0 || len(d.NewlyStarted) > 0 || len(d.NewFiles) > 0 ||
+		d.NextActionFrom != d.NextActionTo || d.CommitFrom != d.CommitTo
+}
+
+// Diff compares two checkpoints and returns what changed.
+func (s *CheckpointService) Diff(ctx context.Context, beforeID, afterID string) (*SnapshotDiff, error) {
+	before, err := s.store.Checkpoints().GetByID(ctx, beforeID)
+	if err != nil {
+		return nil, fmt.Errorf("get before checkpoint: %w", err)
+	}
+	after, err := s.store.Checkpoints().GetByID(ctx, afterID)
+	if err != nil {
+		return nil, fmt.Errorf("get after checkpoint: %w", err)
+	}
+
+	beforeSnap, err := s.ParseSnapshot(before)
+	if err != nil {
+		return nil, err
+	}
+	afterSnap, err := s.ParseSnapshot(after)
+	if err != nil {
+		return nil, err
+	}
+
+	diff := &SnapshotDiff{Before: before, After: after}
+
+	diff.TaskTitleChanged = beforeSnap.Task.Title != afterSnap.Task.Title
+	diff.TaskStatusFrom = beforeSnap.Task.Status
+	diff.TaskStatusTo = afterSnap.Task.Status
+
+	beforeDecisions := idSet(len(beforeSnap.Decisions))
+	for _, d := range beforeSnap.Decisions {
+		beforeDecisions[d.ID] = true
+	}
+	for _, d := range afterSnap.Decisions {
+		if !beforeDecisions[d.ID] {
+			diff.NewDecisions = append(diff.NewDecisions, d)
+		}
+	}
+
+	beforeBlockers := idSet(len(beforeSnap.Blockers))
+	for _, b := range beforeSnap.Blockers {
+		beforeBlockers[b.ID] = true
+	}
+	afterBlockersResolved := map[string]*entities.Blocker{}
+	for _, b := range afterSnap.Blockers {
+		if b.Status == entities.BlockerStatusResolved {
+			afterBlockersResolved[b.ID] = b
+		}
+	}
+	for _, b := range beforeSnap.Blockers {
+		if beforeBlockers[b.ID] && afterBlockersResolved[b.ID] != nil {
+			diff.ResolvedBlockers = append(diff.ResolvedBlockers, b)
+		}
+	}
+	for _, b := range afterSnap.Blockers {
+		if !beforeBlockers[b.ID] && b.Status == entities.BlockerStatusOpen {
+			diff.NewBlockers = append(diff.NewBlockers, b)
+		}
+	}
+
+	diff.NewlyCompleted = sliceDiff(afterSnap.Progress.Completed, beforeSnap.Progress.Completed)
+	diff.NewlyStarted = sliceDiff(afterSnap.Progress.Pending, beforeSnap.Progress.Pending)
+
+	diff.NewFiles = sliceDiff(afterSnap.Files.Modified, beforeSnap.Files.Modified)
+
+	diff.NextActionFrom = beforeSnap.NextAction
+	diff.NextActionTo = afterSnap.NextAction
+
+	diff.CommitFrom = beforeSnap.Workspace.Commit
+	diff.CommitTo = afterSnap.Workspace.Commit
+
+	return diff, nil
+}
+
+func idSet(n int) map[string]bool {
+	if n == 0 {
+		return map[string]bool{}
+	}
+	return make(map[string]bool, n)
+}
+
+func sliceDiff(after, before []string) []string {
+	bset := make(map[string]bool, len(before))
+	for _, s := range before {
+		bset[s] = true
+	}
+	var result []string
+	for _, s := range after {
+		if !bset[s] {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // Restore returns the latest checkpoint snapshot for a session.

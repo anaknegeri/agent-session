@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -22,11 +23,12 @@ const (
 )
 
 type Server struct {
-	root   string // directory used to resolve the project (.agent)
-	mu     sync.Mutex
-	app    *bootstrap.App // lazily opened and cached
-	logger *slog.Logger
-	mcp    *server.MCPServer
+	root           string
+	mu             sync.Mutex
+	app            *bootstrap.App
+	logger         *slog.Logger
+	mcp            *server.MCPServer
+	lastCheckpoint time.Time
 }
 
 // New builds a server rooted at root. The project may not be initialized yet:
@@ -103,8 +105,9 @@ func (s *Server) agent() string {
 	return DefaultAgent
 }
 
-// maybeCheckpoint auto-creates a checkpoint when auto_checkpoint is enabled
-// (PRD §23 automatic: task completed, test completed, major decision).
+// maybeCheckpoint auto-creates a checkpoint when auto_checkpoint is enabled.
+// In smart mode, rate-limits to at most one checkpoint per 60 seconds and
+// skips non-significant events.
 func (s *Server) maybeCheckpoint(ctx context.Context, sessionID, reason string) error {
 	app, err := s.getApp()
 	if err != nil {
@@ -113,7 +116,15 @@ func (s *Server) maybeCheckpoint(ctx context.Context, sessionID, reason string) 
 	if app.Cfg == nil || !app.Cfg.Session.AutoCheckpoint {
 		return nil
 	}
+	if app.Cfg.Session.SmartCheckpoint {
+		if time.Since(s.lastCheckpoint) < 60*time.Second {
+			return nil
+		}
+	}
 	_, err = app.Checkpoint.Create(ctx, sessionID, reason, "", s.agent())
+	if err == nil {
+		s.lastCheckpoint = time.Now()
+	}
 	return err
 }
 

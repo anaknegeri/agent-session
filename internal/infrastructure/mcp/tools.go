@@ -31,6 +31,7 @@ type toolFlagSpec struct {
 // tool without trial-and-error (saves tokens).
 var toolFlags = map[string]toolFlagSpec{
 	"session.get":        {readOnly: true},
+	"session.diff":       {readOnly: true},
 	"context.get":        {readOnly: true},
 	"context.summarize":  {readOnly: true},
 	"task.get":           {readOnly: true},
@@ -88,6 +89,38 @@ func (s *Server) registerTools() {
 				}
 				_, err = s.app.Context.WriteContextMD(ctx, s.app.Root, sessionID)
 				return cp, err
+			},
+		},
+		{
+			name: "session.diff",
+			desc: "Show what changed between two checkpoints (defaults to the two latest).",
+			options: []mcp.ToolOption{
+				mcp.WithString("before_id", mcp.Description("Before checkpoint ID (defaults to second-latest)")),
+				mcp.WithString("after_id", mcp.Description("After checkpoint ID (defaults to latest)")),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := s.currentSession(ctx)
+				if err != nil {
+					return nil, err
+				}
+				beforeID := argString(args, "before_id")
+				afterID := argString(args, "after_id")
+				if beforeID == "" || afterID == "" {
+					cps, cerr := s.app.Checkpoint.ListBySession(ctx, sessionID, 10)
+					if cerr != nil {
+						return nil, cerr
+					}
+					if len(cps) < 2 {
+						return nil, fmt.Errorf("need at least two checkpoints to diff")
+					}
+					if beforeID == "" {
+						beforeID = cps[1].ID
+					}
+					if afterID == "" {
+						afterID = cps[0].ID
+					}
+				}
+				return s.app.Checkpoint.Diff(ctx, beforeID, afterID)
 			},
 		},
 		{

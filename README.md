@@ -2,6 +2,10 @@
 
 > **One session. Any coding agent.**
 
+<p align="center">
+  <img src="docs/banner.png" alt="Agent Session — One session. Any coding agent." width="80%">
+</p>
+
 Universal session & handoff layer for AI coding agents.
 Switch between **Claude Code, Codex, OpenCode** — and any future agent — without losing context.
 
@@ -13,9 +17,9 @@ layer**: agents are interchangeable workers, and the session is the portable sta
 ## Features
 
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
-- **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action.
+- **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline.
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
-- **MCP-native** — 16 tools + 6 resources over stdio or streamable-http.
+- **MCP-native** — 23 tools + 6 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
 - **Checkpoint & handoff** — snapshot the work, hand it to another agent deterministically.
 - **Always available** — agents spawn the stdio MCP server on demand; optional user-scope registration.
@@ -86,6 +90,14 @@ or `--only claude|opencode|codex` to wire a single agent.
 | `agent-session init` | One-command setup (like `git init`): init + wire agents (`--only`, `--no-agents`). Alias: `setup` |
 | `agent-session start [title]` | Start a new session (`-t, --title`) |
 | `agent-session status` | Show current session state |
+| `agent-session ui` | Full-screen dashboard: tasks, progress, decisions, blockers, events, tests |
+| `agent-session stats` | Session statistics: task completion, decisions, blockers, tests, agents used |
+| `agent-session timeline` | Visual event timeline with icons (`-n, --limit`) |
+| `agent-session diff` | Show what changed between two checkpoints (defaults to two latest) |
+| `agent-session projects` | List all registered projects with session status (`--prune` to clean stale) |
+| `agent-session export` | Export session to JSON or Markdown (`-f, --format`, `-o, --output`) |
+| `agent-session import <file>` | Import a session from a JSON export |
+| `agent-session watch` | Auto-regenerate context.md when the session changes (`-i, --interval`) |
 | `agent-session resume` | Resume the latest session (`-a, --agent`) |
 | `agent-session checkpoint` | Create a checkpoint (`--label`, `-n, --next-action`) |
 | `agent-session handoff <agent>` | Compose handoff context for `claude`/`codex`/`opencode` |
@@ -94,7 +106,7 @@ or `--only claude|opencode|codex` to wire a single agent.
 | `agent-session doctor` | Health check: project, session, store, git |
 | `agent-session mcp` | Run the MCP server (`--transport stdio|streamable-http`, `--addr auto|host:port`) |
 | `agent-session plugin pack` | Build the Agent Plugin package |
-| `agent-session plugin install <agent>` | Wire an agent (`--scope project|user` for claude) |
+| `agent-session plugin install <agent>` | Wire an agent: `claude`, `codex`, `opencode`, `cursor`, `cline` (`--scope project|user` for claude) |
 | `agent-session plugin uninstall <agent>` | Remove the wiring |
 | `agent-session setup` | Wire every agent + AGENTS.md for always-on behavior (`--only`) |
 | `agent-session memory put <content>` | Store knowledge (`-k kind`) |
@@ -125,6 +137,8 @@ This wires the "always-on" integration (auto-resume, UC-05) in one step:
 - **OpenCode** — `opencode.json` gets `agent.instructions.system` (verified:
   the agent calls the session tools on its own, no prompting needed).
 - **Codex** — `codex mcp add agent-session`.
+- **Cursor** — `.cursor/mcp.json` (MCP server) + `.cursor/rules/agent-session.mdc` (always-on instructions).
+- **Cline** — `.clinerules` (instructions) + `.vscode/settings.json` (`cline.mcpServers`).
 
 Idempotent — re-running `agent-session setup` is safe.
 
@@ -163,7 +177,7 @@ return `project not initialized, run agent-session init` instead of a connection
 
 ### Tools
 
-`session.get`, `session.checkpoint`, `session.resume`, `context.get`, `context.update`,
+`session.get`, `session.checkpoint`, `session.diff`, `session.resume`, `context.get`, `context.update`, `context.summarize`,
 `task.create`, `task.get`, `task.update`, `decision.list`, `decision.create`,
 `blocker.create`, `blocker.list`, `blocker.resolve`, `event.append`,
 `workspace.status`, `workspace.diff`,
@@ -291,6 +305,7 @@ driver = "sqlite"
 
 [session]
 auto_checkpoint = true      # checkpoint after task/decision/test events
+smart_checkpoint = true     # rate-limit auto-checkpoints (max 1 per 60s)
 
 [git]
 enabled = true

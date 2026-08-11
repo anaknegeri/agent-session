@@ -36,7 +36,8 @@ type StorageConfig struct {
 }
 
 type SessionConfig struct {
-	AutoCheckpoint bool `toml:"auto_checkpoint"`
+	AutoCheckpoint  bool `toml:"auto_checkpoint"`
+	SmartCheckpoint bool `toml:"smart_checkpoint"`
 }
 
 // ContextConfig bounds how much context is rendered (token savings).
@@ -75,7 +76,7 @@ func Default() *Config {
 	return &Config{
 		Project: ProjectConfig{},
 		Storage: StorageConfig{Driver: "sqlite"},
-		Session: SessionConfig{AutoCheckpoint: true},
+		Session: SessionConfig{AutoCheckpoint: true, SmartCheckpoint: true},
 		Context: ContextConfig{
 			MaxDecisions:  5,
 			MaxBlockers:   3,

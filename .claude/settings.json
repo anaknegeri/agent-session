@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "agent-session checkpoint --label precompact",
+            "type": "command"
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [

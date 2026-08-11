@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -24,13 +25,19 @@ func newInitCmd() *cobra.Command {
 			dir := cwd()
 			bin := selfPath()
 
-			if _, err := bootstrap.Open("."); err != nil {
-				if _, err := bootstrap.Init(dir, "cli"); err != nil {
+			app, err := bootstrap.Open(".")
+			if err != nil {
+				app, err = bootstrap.Init(dir, "cli")
+				if err != nil {
 					return err
 				}
 				fmt.Printf("✓ project initialized\n")
 			} else {
 				fmt.Printf("✓ project already initialized\n")
+			}
+
+			if regErr := registerProject(app.Root, app.Cfg.Project.Name); regErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not register project: %v\n", regErr)
 			}
 
 			if noAgents {
@@ -53,10 +60,16 @@ func newInitCmd() *cobra.Command {
 			if only == "" || only == "opencode" {
 				installOpenCode(dir, bin)
 			}
-			if only == "" || only == "codex" {
-				installCodex(bin)
-			}
-			fmt.Printf("done. agent-session is now active in this project.\n")
+		if only == "" || only == "codex" {
+			installCodex(bin)
+		}
+		if only == "" || only == "cursor" {
+			installCursor(dir, bin)
+		}
+		if only == "" || only == "cline" {
+			installCline(dir, bin)
+		}
+		fmt.Printf("done. agent-session is now active in this project.\n")
 			return nil
 		},
 	}

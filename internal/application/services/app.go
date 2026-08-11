@@ -19,6 +19,7 @@ type App struct {
 	Handoff    *HandoffService
 	Artifact   *ArtifactService
 	Memory     *MemoryService
+	Export     *ExportService
 	Store      ports.Store
 }
 

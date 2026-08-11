@@ -48,6 +48,7 @@ type EventRepository interface {
 
 type CheckpointRepository interface {
 	Create(ctx context.Context, checkpoint *entities.Checkpoint) error
+	GetByID(ctx context.Context, id string) (*entities.Checkpoint, error)
 	GetLatest(ctx context.Context, sessionID string) (*entities.Checkpoint, error)
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]*entities.Checkpoint, error)
 }

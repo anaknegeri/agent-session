@@ -4,7 +4,9 @@ import (
 	"os/exec"
 
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cline"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cursor"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
 )
 
@@ -46,4 +48,22 @@ func installCodex(bin string) {
 		return
 	}
 	green("✓ codex: mcp_servers.agent-session registered\n")
+}
+
+func installCursor(dir, bin string) {
+	a := cursor.NewAdapter(dir)
+	if err := a.Configure(ctx(), bin); err != nil {
+		red("✗ cursor: %v\n", err)
+		return
+	}
+	green("✓ cursor: .cursor/mcp.json + .cursor/rules/agent-session.mdc\n")
+}
+
+func installCline(dir, bin string) {
+	a := cline.NewAdapter(dir)
+	if err := a.Configure(ctx(), bin); err != nil {
+		red("✗ cline: %v\n", err)
+		return
+	}
+	green("✓ cline: .clinerules + .vscode/settings.json (cline.mcpServers)\n")
 }

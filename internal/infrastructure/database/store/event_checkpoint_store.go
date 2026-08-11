@@ -52,6 +52,17 @@ func (s *checkpointStore) Create(ctx context.Context, checkpoint *entities.Check
 	return nil
 }
 
+func (s *checkpointStore) GetByID(ctx context.Context, id string) (*entities.Checkpoint, error) {
+	var cp entities.Checkpoint
+	if err := s.db.WithContext(ctx).First(&cp, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domainerr.ErrCheckpointNotFound
+		}
+		return nil, fmt.Errorf("get checkpoint: %w", err)
+	}
+	return &cp, nil
+}
+
 func (s *checkpointStore) GetLatest(ctx context.Context, sessionID string) (*entities.Checkpoint, error) {
 	var cp entities.Checkpoint
 	err := s.db.WithContext(ctx).

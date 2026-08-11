@@ -61,6 +61,10 @@ func ProvideMemoryService(store ports.Store, logger *slog.Logger) *app.MemorySer
 	return app.NewMemoryService(store, logger)
 }
 
+func ProvideExportService(store ports.Store) *app.ExportService {
+	return app.NewExportService(store)
+}
+
 func ProvideApp(
 	init *app.InitService,
 	session *app.SessionService,
@@ -73,6 +77,7 @@ func ProvideApp(
 	handoff *app.HandoffService,
 	artifact *app.ArtifactService,
 	memory *app.MemoryService,
+	exportSvc *app.ExportService,
 	store ports.Store,
 ) *app.App {
 	return &app.App{
@@ -87,6 +92,7 @@ func ProvideApp(
 		Handoff:    handoff,
 		Artifact:   artifact,
 		Memory:     memory,
+		Export:     exportSvc,
 		Store:      store,
 	}
 }
