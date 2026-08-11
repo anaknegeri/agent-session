@@ -57,7 +57,7 @@ agent-session plugin install claude --scope user
 
 ```bash
 cd your-project
-agent-session setup               # ONE command: init (if needed) + wire every agent
+agent-session init                # one command, like `git init`: init + wire every agent
 agent-session start "Implement OAuth2 PKCE"
 agent-session status              # progress, blocked, next
 agent-session checkpoint --next-action "Fix refresh token rotation"
@@ -67,12 +67,13 @@ agent-session history             # event log
 agent-session context             # print context.md
 ```
 
-`agent-session setup` is the one-command entrypoint per project: it initializes the
-project when there is no `.agent` yet, then wires AGENTS.md and all agents.
-Run `agent-session init` alone only if you want the session layer without the
-agent wiring.
+`agent-session init` is the one-command entrypoint per project, modeled after
+`git init`: it initializes the project (creates `.agent/`, starts a session) and
+wires AGENTS.md plus all agents. It is idempotent — safe to re-run.
+`agent-session setup` is an alias. Add `--no-agents` for the session layer only,
+or `--only claude|opencode|codex` to wire a single agent.
 
-> **Not a git repo yet?** `setup`/`init` reminds you to run `git init` first.
+> **Not a git repo yet?** `init` reminds you to run `git init` first.
 > The session works in local-only mode meanwhile, but Agent Session is Git-aware
 > and tracks branch/commit/diff once git exists.
 
@@ -82,7 +83,7 @@ agent wiring.
 
 | Command | Description |
 |---|---|
-| `agent-session init` | Initialize the project, create `.agent/`, start a session |
+| `agent-session init` | One-command setup (like `git init`): init + wire agents (`--only`, `--no-agents`). Alias: `setup` |
 | `agent-session start [title]` | Start a new session (`-t, --title`) |
 | `agent-session status` | Show current session state |
 | `agent-session resume` | Resume the latest session (`-a, --agent`) |
@@ -105,11 +106,12 @@ agent wiring.
 
 ## Make every agent use Agent Session automatically
 
-One command per project — it initializes if needed and wires everything:
+One command per project, modeled after `git init` — it initializes if needed and
+wires everything (idempotent):
 
 ```bash
 cd your-project
-agent-session setup
+agent-session init
 ```
 
 This wires the "always-on" integration (auto-resume, UC-05) in one step:

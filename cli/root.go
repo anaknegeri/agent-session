@@ -30,7 +30,6 @@ func NewRootCmd() *cobra.Command {
 		newDoctorCmd(),
 		newMCPCmd(),
 		newPluginCmd(),
-		newSetupCmd(),
 		newMemoryCmd(),
 	)
 	return root
@@ -60,4 +59,16 @@ func ctx() context.Context {
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "Error: "+err.Error())
 	os.Exit(1)
+}
+
+func green(format string, a ...any) {
+	fmt.Printf("\033[32m"+format+"\033[0m", a...)
+}
+
+func yellow(format string, a ...any) {
+	fmt.Printf("\033[33m"+format+"\033[0m", a...)
+}
+
+func red(format string, a ...any) {
+	fmt.Printf("\033[31m"+format+"\033[0m", a...)
 }
