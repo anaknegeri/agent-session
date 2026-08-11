@@ -24,6 +24,27 @@ const (
 
 var serverVersion = version.Version
 
+// serverInstructions is surfaced by MCP clients (e.g. Claude Code renders it
+// as "MCP Server Instructions") so the agent proactively knows about the
+// session layer without prompting.
+const serverInstructions = `Agent Session: universal session & handoff layer for AI coding agents.
+
+This project uses Agent Session to keep work context across sessions and agents. Follow this workflow:
+
+1. At the start of a session, FIRST call these tools in order:
+   - session.get - find the current session
+   - context.get - load the current context (start with depth=summary, use depth=full when you need complete decisions, blockers, changed files, or the full event list)
+   Continue the existing task; do not start from scratch.
+
+2. Record work as you go:
+   - task.create / task.update - track the current task
+   - decision.create - record architectural decisions with a reason
+   - blocker.create - record blockers
+   - event.append - record test results (test.failed / test.passed) and file.changed
+
+3. Before finishing (Stop / session end), create a checkpoint:
+   - session.checkpoint - include the next_action so the next agent can continue.`
+
 type Server struct {
 	root           string
 	mu             sync.Mutex
@@ -38,7 +59,10 @@ type Server struct {
 // `agent-session init` starts working as soon as init completes.
 func New(root string, logger *slog.Logger) *Server {
 	s := &Server{root: root, logger: logger}
-	s.mcp = server.NewMCPServer(serverName, serverVersion, server.WithLogging())
+	s.mcp = server.NewMCPServer(serverName, serverVersion,
+		server.WithLogging(),
+		server.WithInstructions(serverInstructions),
+	)
 	s.registerTools()
 	s.registerResources()
 	return s

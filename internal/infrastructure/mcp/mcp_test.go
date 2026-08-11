@@ -291,6 +291,38 @@ func TestMCPToolAnnotations(t *testing.T) {
 	}
 }
 
+// TestMCPInstructions ensures the server declares the `instructions` field in
+// its InitializeResult. Clients like Claude Code surface this proactively as
+// "MCP Server Instructions" in every turn, which is how agents discover the
+// session workflow without being prompted.
+func TestMCPInstructions(t *testing.T) {
+	dir := t.TempDir()
+	gitInit(t, dir)
+	if _, err := bootstrap.Init(dir, "claude"); err != nil {
+		t.Fatal(err)
+	}
+
+	server := agentsession.New(dir, logger.New("error"))
+	c, err := client.NewInProcessClient(server.MCPServer())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+
+	initRes, err := c.Initialize(context.Background(), mcp.InitializeRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initRes.Instructions == "" {
+		t.Fatal("InitializeResult.Instructions is empty; agents won't proactively learn about the session workflow")
+	}
+	for _, want := range []string{"session.get", "context.get", "session.checkpoint"} {
+		if !strings.Contains(initRes.Instructions, want) {
+			t.Fatalf("instructions missing %q", want)
+		}
+	}
+}
+
 func extractIDLike(t *testing.T, text, prefix string) string {
 	t.Helper()
 	start := strings.Index(text, prefix)
