@@ -2,32 +2,41 @@
 set -euo pipefail
 
 # update-homebrew-formula.sh — regenerate packaging/Homebrew/agent-session.rb
-# with the current version and SHA256 checksums from local dist binaries.
+# with the current version and SHA256 checksums fetched from the GitHub release
+# (source of truth), not from local builds.
 #
-# Requires: dist binaries already built (make cross-compile).
-# Works with bash 3.2 (macOS default).
+# Usage: bash scripts/update-homebrew-formula.sh
 # After regenerating, publish the formula to your Homebrew tap.
 
 cd "$(dirname "$0")/.."
 
 version_tag="$(./scripts/version.sh)"
 version="${version_tag#v}"
+repo="anaknegeri/agent-session"
 dir="packaging/Homebrew"
+base="https://github.com/${repo}/releases/download/${version_tag}"
 
-[ -d "dist" ] || { echo "error: no dist/ — run make cross-compile first" >&2; exit 1; }
+# Fetch the release checksums file.
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+if ! curl -fsSL "${base}/SHA256SUMS.txt" -o "$tmp/SHA256SUMS.txt"; then
+  echo "error: could not fetch ${base}/SHA256SUMS.txt — is the release published?" >&2
+  exit 1
+fi
 
 sha256_for() {
-  shasum -a 256 "dist/$1" 2>/dev/null | awk '{print $1}'
+  awk -v asset="$1" '$2 == asset { print $1 }' "$tmp/SHA256SUMS.txt"
 }
 
-darwin_arm64=$(sha256_for agent-session-darwin-arm64)
-darwin_amd64=$(sha256_for agent-session-darwin-amd64)
-linux_arm64=$(sha256_for agent-session-linux-arm64)
-linux_amd64=$(sha256_for agent-session-linux-amd64)
-mcp_darwin_arm64=$(sha256_for agent-session-mcp-darwin-arm64)
-mcp_darwin_amd64=$(sha256_for agent-session-mcp-darwin-amd64)
-mcp_linux_arm64=$(sha256_for agent-session-mcp-linux-arm64)
-mcp_linux_amd64=$(sha256_for agent-session-mcp-linux-amd64)
+# Homebrew bottle for the current OS (macOS arm64) — lets brew install the
+# pre-built package without invoking a compiler.
+bottle_sha256=""
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+  bottle_url="${base}/agent-session--${version}.arm64_golden_gate.bottle.tar.gz"
+  if curl -fsSL "${bottle_url}" -o "$tmp/bottle.tar.gz"; then
+    bottle_sha256="$(shasum -a 256 "$tmp/bottle.tar.gz" | awk '{print $1}')"
+  fi
+fi
 
 cat > "$dir/agent-session.rb" <<EOF
 # Homebrew formula for Agent Session (macOS + Linux via Linuxbrew).
@@ -38,39 +47,43 @@ class AgentSession < Formula
   homepage "https://agent-session.dev"
   license "MIT"
   version "${version}"
+  bottle do
+    root_url "https://github.com/anaknegeri/agent-session/releases/download/v${version}"
+    sha256 cellar: :any_skip_relocation, arm64_golden_gate: "${bottle_sha256}"
+  end
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-darwin-arm64"
-      sha256 "${darwin_arm64}"
+      url "${base}/agent-session-darwin-arm64"
+      sha256 "$(sha256_for agent-session-darwin-arm64)"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-darwin-arm64"
-        sha256 "${mcp_darwin_arm64}"
+        url "${base}/agent-session-mcp-darwin-arm64"
+        sha256 "$(sha256_for agent-session-mcp-darwin-arm64)"
       end
     else
-      url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-darwin-amd64"
-      sha256 "${darwin_amd64}"
+      url "${base}/agent-session-darwin-amd64"
+      sha256 "$(sha256_for agent-session-darwin-amd64)"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-darwin-amd64"
-        sha256 "${mcp_darwin_amd64}"
+        url "${base}/agent-session-mcp-darwin-amd64"
+        sha256 "$(sha256_for agent-session-mcp-darwin-amd64)"
       end
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-linux-arm64"
-      sha256 "${linux_arm64}"
+      url "${base}/agent-session-linux-arm64"
+      sha256 "$(sha256_for agent-session-linux-arm64)"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-linux-arm64"
-        sha256 "${mcp_linux_arm64}"
+        url "${base}/agent-session-mcp-linux-arm64"
+        sha256 "$(sha256_for agent-session-mcp-linux-arm64)"
       end
     else
-      url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-linux-amd64"
-      sha256 "${linux_amd64}"
+      url "${base}/agent-session-linux-amd64"
+      sha256 "$(sha256_for agent-session-linux-amd64)"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v${version}/agent-session-mcp-linux-amd64"
-        sha256 "${mcp_linux_amd64}"
+        url "${base}/agent-session-mcp-linux-amd64"
+        sha256 "$(sha256_for agent-session-mcp-linux-amd64)"
       end
     end
   end
