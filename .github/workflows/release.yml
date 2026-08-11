@@ -27,10 +27,15 @@ jobs:
         run: |
           ext=""
           [ "${{ matrix.os }}" = "windows" ] && ext=".exe"
+          version="${GITHUB_REF_NAME#v}"
+          ldflags="-s -w \
+            -X github.com/anaknegeri/agent-session/pkg/version.Version=${version} \
+            -X github.com/anaknegeri/agent-session/pkg/version.Commit=${{ github.sha }} \
+            -X github.com/anaknegeri/agent-session/pkg/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           for bin in agent-session agent-session-mcp; do
             out="${bin}-${{ matrix.os }}-${{ matrix.arch }}${ext}"
             CGO_ENABLED=0 GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} \
-              go build -trimpath -ldflags "-s -w" -o "$out" ./cmd/${bin}
+              go build -trimpath -ldflags "$ldflags" -o "$out" ./cmd/${bin}
           done
           echo "built for ${{ matrix.os }}/${{ matrix.arch }}"
 
