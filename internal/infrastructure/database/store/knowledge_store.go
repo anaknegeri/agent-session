@@ -62,10 +62,24 @@ func (s *knowledgeStore) ListByKind(ctx context.Context, kind string, limit int)
 }
 
 func (s *knowledgeStore) Search(ctx context.Context, query string, limit int) ([]*entities.KnowledgeHit, error) {
-	match, err := ftsMatch(query)
+	match, err := ftsMatch(query, "AND")
 	if err != nil {
 		return nil, err
 	}
+	return s.search(ctx, match, limit)
+}
+
+// SearchAny matches any term (OR), ranked by bm25 — used to surface related
+// knowledge when not all terms are present.
+func (s *knowledgeStore) SearchAny(ctx context.Context, query string, limit int) ([]*entities.KnowledgeHit, error) {
+	match, err := ftsMatch(query, "OR")
+	if err != nil {
+		return nil, err
+	}
+	return s.search(ctx, match, limit)
+}
+
+func (s *knowledgeStore) search(ctx context.Context, match string, limit int) ([]*entities.KnowledgeHit, error) {
 	sql := `SELECT k.id, k.session_id, k.kind, k.content, k.source_type, k.source_id, k.agent, k.created_at,
 	        snippet(knowledge_fts, 0, '«', '»', '…', 12) AS snippet
 	        FROM knowledge_fts
@@ -80,9 +94,9 @@ func (s *knowledgeStore) Search(ctx context.Context, query string, limit int) ([
 	return hits, nil
 }
 
-// ftsMatch turns a user query into an FTS5 query that matches all words
-// (AND of quoted terms), so "refresh token" finds "refresh tokens".
-func ftsMatch(query string) (string, error) {
+// ftsMatch turns a user query into an FTS5 query joined by the operator
+// ("AND" or "OR") of quoted terms, so "refresh token" finds "refresh tokens".
+func ftsMatch(query, operator string) (string, error) {
 	terms := strings.Fields(query)
 	if len(terms) == 0 {
 		return "", fmt.Errorf("empty search query")
@@ -91,7 +105,7 @@ func ftsMatch(query string) (string, error) {
 	for _, term := range terms {
 		parts = append(parts, `"`+term+`"`)
 	}
-	return strings.Join(parts, " AND "), nil
+	return strings.Join(parts, " "+operator+" "), nil
 }
 
 func (s *knowledgeStore) Delete(ctx context.Context, id string) error {

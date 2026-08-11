@@ -31,7 +31,7 @@ var appSet = wire.NewSet(
 )
 
 // InitializeApp wires the application with a runtime store.
-func InitializeApp(store ports.Store, logger *slog.Logger) (*app.App, error) {
+func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget) (*app.App, error) {
 	wire.Build(appSet)
 	return &app.App{}, nil
 }

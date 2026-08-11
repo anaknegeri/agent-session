@@ -256,6 +256,41 @@ func TestMCPLazyInitAfterInit(t *testing.T) {
 	}
 }
 
+func TestMCPContextSummarize(t *testing.T) {
+	c, _ := setupMCP(t)
+
+	res := call(t, c, "context.summarize", nil)
+	if !strings.Contains(res, "memory.put") {
+		t.Fatalf("context.summarize should instruct storing via memory.put, got: %s", res)
+	}
+	if !strings.Contains(res, "Agent Session") {
+		t.Fatalf("context.summarize should include session data, got: %s", res)
+	}
+}
+
+func TestMCPToolAnnotations(t *testing.T) {
+	c, _ := setupMCP(t)
+
+	res, err := c.ListTools(context.Background(), mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]mcp.Tool{}
+	for _, tl := range res.Tools {
+		byName[tl.Name] = tl
+	}
+
+	if tl, ok := byName["session.get"]; !ok || tl.Annotations.ReadOnlyHint == nil || !*tl.Annotations.ReadOnlyHint {
+		t.Fatalf("session.get should be readOnly, got %+v", byName["session.get"].Annotations)
+	}
+	if tl, ok := byName["memory.delete"]; !ok || tl.Annotations.DestructiveHint == nil || !*tl.Annotations.DestructiveHint {
+		t.Fatalf("memory.delete should be destructive, got %+v", byName["memory.delete"].Annotations)
+	}
+	if tl, ok := byName["memory.search"]; !ok || tl.Annotations.ReadOnlyHint == nil || !*tl.Annotations.ReadOnlyHint {
+		t.Fatalf("memory.search should be readOnly, got %+v", byName["memory.search"].Annotations)
+	}
+}
+
 func extractIDLike(t *testing.T, text, prefix string) string {
 	t.Helper()
 	start := strings.Index(text, prefix)

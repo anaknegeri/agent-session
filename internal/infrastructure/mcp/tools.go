@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -11,10 +12,46 @@ import (
 )
 
 type toolSpec struct {
-	name    string
-	desc    string
-	options []mcp.ToolOption
-	run     func(ctx context.Context, args map[string]any) (any, error)
+	name        string
+	desc        string
+	options     []mcp.ToolOption
+	readOnly    bool
+	destructive bool
+	idempotent  bool
+	run         func(ctx context.Context, args map[string]any) (any, error)
+}
+
+type toolFlagSpec struct {
+	readOnly    bool
+	destructive bool
+	idempotent  bool
+}
+
+// toolFlags annotate tools with MCP behavior hints so agents can pick the right
+// tool without trial-and-error (saves tokens).
+var toolFlags = map[string]toolFlagSpec{
+	"session.get":        {readOnly: true},
+	"context.get":        {readOnly: true},
+	"context.summarize":  {readOnly: true},
+	"task.get":           {readOnly: true},
+	"decision.list":      {readOnly: true},
+	"blocker.list":       {readOnly: true},
+	"workspace.status":   {readOnly: true},
+	"workspace.diff":     {readOnly: true},
+	"memory.get":         {readOnly: true},
+	"memory.search":      {readOnly: true},
+	"session.checkpoint": {idempotent: true},
+	"session.resume":     {idempotent: true},
+	"task.create":        {idempotent: true},
+	"task.update":        {idempotent: true},
+	"decision.create":    {idempotent: true},
+	"blocker.create":     {idempotent: true},
+	"blocker.resolve":    {idempotent: true},
+	"event.append":       {idempotent: true},
+	"context.update":     {idempotent: true},
+	"memory.put":         {idempotent: true},
+	"memory.promote":     {idempotent: true},
+	"memory.delete":      {destructive: true},
 }
 
 func (s *Server) registerTools() {
@@ -105,6 +142,34 @@ func (s *Server) registerTools() {
 				mcp.WithString("value", mcp.Description("New value"), mcp.Required()),
 			},
 			run: s.runContextUpdate,
+		},
+		{
+			name: "context.summarize",
+			desc: "Ask the agent to summarize the session and store it via memory.put (uses the agent's own model, no external LLM).",
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := s.currentSession(ctx)
+				if err != nil {
+					return nil, err
+				}
+				contextText, err := s.app.Context.Get(ctx, sessionID, "summary")
+				if err != nil {
+					return nil, err
+				}
+				events, _ := s.app.Event.List(ctx, sessionID, 8)
+
+				var b strings.Builder
+				b.WriteString("Write a concise summary of this coding session (2-4 sentences) covering: current task, progress, key decisions, blockers, and next action. ")
+				b.WriteString("Then store the summary using the memory.put tool with kind=project_knowledge. ")
+				b.WriteString("Base the summary ONLY on the data below.\n\n")
+				b.WriteString(contextText)
+				if len(events) > 0 {
+					b.WriteString("\n\n## Recent events\n")
+					for _, e := range events {
+						fmt.Fprintf(&b, "- %s [%s]\n", e.Type, e.Agent)
+					}
+				}
+				return b.String(), nil
+			},
 		},
 		{
 			name: "task.create",
@@ -345,7 +410,21 @@ func (s *Server) registerTools() {
 
 	for _, spec := range specs {
 		spec := spec
-		s.mcp.AddTool(mcp.NewTool(spec.name, spec.options...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if f, ok := toolFlags[spec.name]; ok {
+			spec.readOnly, spec.destructive, spec.idempotent = f.readOnly, f.destructive, f.idempotent
+		}
+		annotation := mcp.ToolAnnotation{}
+		if spec.readOnly {
+			annotation.ReadOnlyHint = mcp.ToBoolPtr(true)
+		}
+		if spec.destructive {
+			annotation.DestructiveHint = mcp.ToBoolPtr(true)
+		}
+		if spec.idempotent {
+			annotation.IdempotentHint = mcp.ToBoolPtr(true)
+		}
+		toolOpts := append(spec.options, mcp.WithToolAnnotation(annotation))
+		s.mcp.AddTool(mcp.NewTool(spec.name, toolOpts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if err := s.ready(); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

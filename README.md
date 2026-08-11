@@ -115,7 +115,6 @@ agent-session init
 ```
 
 This wires the "always-on" integration (auto-resume, UC-05) in one step:
-
 - **AGENTS.md** — appends a mandatory workflow section read by OpenCode, Codex,
   Cursor and Claude Code: agents first call `session.get` + `context.get`, track
   work with `task.*` / `decision.*` / `blocker.*` / `event.append`, and create a
@@ -195,6 +194,43 @@ long-term store with SQLite FTS5 (porter tokenizer) full-text search:
   Idempotent — already-promoted entities are skipped.
 
 ---
+
+## Token savings
+
+Agent Session is designed to keep prompts small (state over transcript, PRD §25):
+
+- **Progressive context loading** — `context.get` defaults to a bounded summary,
+  not full history.
+- **Context budget** — configurable limits (`[context]`): max decisions/blockers/
+  files/events/progress, per-item truncation, and a hard total clamp
+  (`max_total_chars`). Lists render as `… +N more`.
+- **Relevant memory injection** — `context.get` automatically surfaces top-k
+  related knowledge (local FTS search of the current task) so agents don't
+  re-derive known facts.
+- **Tool annotations** — every MCP tool carries `readOnlyHint` /
+  `destructiveHint` / `idempotentHint` so agents pick the right tool without
+  trial-and-error.
+- **PreCompact checkpoint** — Claude Code saves a checkpoint before context
+  compaction, so nothing is lost when the window shrinks.
+- **Agent-driven summarizer** — `context.summarize` asks the agent itself to
+  write a short session summary and store it via `memory.put` (kind
+  `project_knowledge`). No external LLM API needed.
+- **Artifacts** — large event payloads are stored as references, not inline.
+
+Tune in `.agent/config.toml`:
+
+```toml
+[context]
+max_decisions  = 5
+max_blockers   = 3
+max_files      = 8
+max_events     = 10
+max_progress   = 10
+max_item_chars = 200
+max_total_chars = 4000
+inject_memory  = true
+max_memory     = 3
+```
 
 ## Configuration
 

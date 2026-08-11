@@ -24,6 +24,9 @@ This project uses Agent Session (agent-session) as its session layer. Always fol
    - event.append — record test results (test.failed / test.passed) and file.changed
 3. Before finishing (Stop / session end), create a checkpoint:
    - session.checkpoint — include the next_action so the next agent can continue.
+4. To keep context small and share learnings across sessions, summarize:
+   - call context.summarize, then store the resulting summary with memory.put
+     (kind=project_knowledge). This uses your own model — no external LLM API.
 `
 
 // EnsureAGENTSMD idempotently appends the Agent Session section to AGENTS.md

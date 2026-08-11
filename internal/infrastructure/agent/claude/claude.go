@@ -89,6 +89,17 @@ func (a *Adapter) Install(ctx context.Context) error {
 					},
 				},
 			},
+			"PreCompact": []map[string]any{
+				{
+					"matcher": "*",
+					"hooks": []map[string]any{
+						{
+							"type":    "command",
+							"command": "agent-session checkpoint --label precompact",
+						},
+					},
+				},
+			},
 		},
 	}
 	data, err := json.MarshalIndent(settings, "", "  ")
@@ -109,6 +120,8 @@ This project uses Agent Session (agent-session) as its session layer.
 - Record work as you go: task.create / task.update, decision.create, blocker.create,
   and event.append for test results (test.failed / test.passed).
 - Before finishing (Stop), create a checkpoint with session.checkpoint including next_action.
+- To keep context small, summarize before finishing: call context.summarize, then
+  store the summary with memory.put (kind=project_knowledge).
 `)
 	if err := os.WriteFile(filepath.Join(settingsDir, "CLAUDE.md"), claudeMD, 0o644); err != nil {
 		return fmt.Errorf("write CLAUDE.md: %w", err)

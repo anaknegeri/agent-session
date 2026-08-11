@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/anaknegeri/agent-session/internal/application/ports"
 	app "github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/database"
@@ -39,7 +40,8 @@ func Init(dir, agent string) (*App, error) {
 	}
 
 	log := logger.New("info")
-	wired, err := wire.InitializeApp(store, log)
+	cfg := config.Default()
+	wired, err := wire.InitializeApp(store, log, contextBudget(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("wire app: %w", err)
 	}
@@ -53,7 +55,6 @@ func Init(dir, agent string) (*App, error) {
 		fmt.Fprintln(os.Stderr, gitInitReminder())
 	}
 
-	cfg := config.Default()
 	cfg.Project.Name = result.Project.Name
 	if err := config.Save(abs, cfg); err != nil {
 		return nil, err
@@ -87,18 +88,53 @@ func Open(dir string) (*App, error) {
 		return nil, err
 	}
 
-	log := logger.New("info")
-	wired, err := wire.InitializeApp(store, log)
-	if err != nil {
-		return nil, fmt.Errorf("wire app: %w", err)
-	}
-
 	cfg, err := config.Load(root)
 	if err != nil {
 		return nil, err
 	}
 
+	log := logger.New("info")
+	wired, err := wire.InitializeApp(store, log, contextBudget(cfg))
+	if err != nil {
+		return nil, fmt.Errorf("wire app: %w", err)
+	}
+
 	return &App{App: wired, Root: root, Cfg: cfg}, nil
+}
+
+// contextBudget maps config to the context render budget.
+func contextBudget(cfg *config.Config) ports.ContextBudget {
+	b := ports.DefaultContextBudget()
+	if cfg == nil {
+		return b
+	}
+	c := cfg.Context
+	if c.MaxDecisions > 0 {
+		b.MaxDecisions = c.MaxDecisions
+	}
+	if c.MaxBlockers > 0 {
+		b.MaxBlockers = c.MaxBlockers
+	}
+	if c.MaxFiles > 0 {
+		b.MaxFiles = c.MaxFiles
+	}
+	if c.MaxEvents > 0 {
+		b.MaxEvents = c.MaxEvents
+	}
+	if c.MaxProgress > 0 {
+		b.MaxProgress = c.MaxProgress
+	}
+	if c.MaxItemChars > 0 {
+		b.MaxItemChars = c.MaxItemChars
+	}
+	if c.MaxTotalChars > 0 {
+		b.MaxTotalChars = c.MaxTotalChars
+	}
+	if c.MaxMemory > 0 {
+		b.MaxMemory = c.MaxMemory
+	}
+	b.InjectMemory = c.InjectMemory
+	return b
 }
 
 var errNotInitialized = fmt.Errorf("project not initialized, run agent-session init")

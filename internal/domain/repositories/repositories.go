@@ -67,6 +67,7 @@ type KnowledgeRepository interface {
 	GetByID(ctx context.Context, id string) (*entities.Knowledge, error)
 	ListByKind(ctx context.Context, kind string, limit int) ([]*entities.Knowledge, error)
 	Search(ctx context.Context, query string, limit int) ([]*entities.KnowledgeHit, error)
+	SearchAny(ctx context.Context, query string, limit int) ([]*entities.KnowledgeHit, error)
 	Delete(ctx context.Context, id string) error
 	ExistsSource(ctx context.Context, sourceType, sourceID string) (bool, error)
 }

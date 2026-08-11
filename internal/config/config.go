@@ -21,6 +21,7 @@ type Config struct {
 	Project ProjectConfig `toml:"project"`
 	Storage StorageConfig `toml:"storage"`
 	Session SessionConfig `toml:"session"`
+	Context ContextConfig `toml:"context"`
 	Git     GitConfig     `toml:"git"`
 	Agents  AgentsConfig  `toml:"agents"`
 	Sync    SyncConfig    `toml:"sync"`
@@ -36,6 +37,19 @@ type StorageConfig struct {
 
 type SessionConfig struct {
 	AutoCheckpoint bool `toml:"auto_checkpoint"`
+}
+
+// ContextConfig bounds how much context is rendered (token savings).
+type ContextConfig struct {
+	MaxDecisions  int  `toml:"max_decisions"`
+	MaxBlockers   int  `toml:"max_blockers"`
+	MaxFiles      int  `toml:"max_files"`
+	MaxEvents     int  `toml:"max_events"`
+	MaxProgress   int  `toml:"max_progress"`
+	MaxItemChars  int  `toml:"max_item_chars"`
+	MaxTotalChars int  `toml:"max_total_chars"`
+	InjectMemory  bool `toml:"inject_memory"`
+	MaxMemory     int  `toml:"max_memory"`
 }
 
 type GitConfig struct {
@@ -62,7 +76,18 @@ func Default() *Config {
 		Project: ProjectConfig{},
 		Storage: StorageConfig{Driver: "sqlite"},
 		Session: SessionConfig{AutoCheckpoint: true},
-		Git:     GitConfig{Enabled: true},
+		Context: ContextConfig{
+			MaxDecisions:  5,
+			MaxBlockers:   3,
+			MaxFiles:      8,
+			MaxEvents:     10,
+			MaxProgress:   10,
+			MaxItemChars:  200,
+			MaxTotalChars: 4000,
+			InjectMemory:  true,
+			MaxMemory:     3,
+		},
+		Git: GitConfig{Enabled: true},
 		Agents: AgentsConfig{
 			Claude:   AgentConfig{Enabled: true},
 			Codex:    AgentConfig{Enabled: true},

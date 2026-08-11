@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/anaknegeri/agent-session/internal/application/ports"
 	app "github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/database"
 	"github.com/anaknegeri/agent-session/internal/wire"
@@ -34,7 +35,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	app, err := wire.InitializeApp(store, logger.New("error"))
+	app, err := wire.InitializeApp(store, logger.New("error"), ports.DefaultContextBudget())
 	if err != nil {
 		t.Fatal(err)
 	}

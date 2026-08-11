@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
@@ -13,8 +14,9 @@ func NewRenderer() *renderer {
 	return &renderer{}
 }
 
-// RenderContext produces the human-readable context.md (PRD §4.5).
-func (r *renderer) RenderContext(snapshot *entities.Snapshot) (string, error) {
+// RenderContext produces a budgeted, human-readable context.md (PRD §4.5).
+// Lists and strings are truncated to keep the prompt small (token savings).
+func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.ContextBudget) (string, error) {
 	var b strings.Builder
 
 	b.WriteString("# Agent Session")
@@ -41,35 +43,32 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot) (string, error) {
 		fmt.Fprintf(&b, "%s — %s\n", snapshot.Task.Title, snapshot.Task.Status)
 	}
 
-	if len(snapshot.Progress.Completed) > 0 {
-		b.WriteString("\n## Completed\n")
-		for _, item := range snapshot.Progress.Completed {
-			fmt.Fprintf(&b, "- %s\n", item)
-		}
-	}
-
-	if len(snapshot.Progress.Pending) > 0 {
-		b.WriteString("\n## In progress\n")
-		for _, item := range snapshot.Progress.Pending {
-			fmt.Fprintf(&b, "- %s\n", item)
-		}
-	}
+	budgetedList(&b, "## Completed", snapshot.Progress.Completed, budget.MaxProgress, budget.MaxItemChars)
+	budgetedList(&b, "## In progress", snapshot.Progress.Pending, budget.MaxProgress, budget.MaxItemChars)
 
 	if len(snapshot.Decisions) > 0 {
 		b.WriteString("\n## Decisions\n")
-		for _, d := range snapshot.Decisions {
+		limit := limit(len(snapshot.Decisions), budget.MaxDecisions)
+		for _, d := range snapshot.Decisions[:limit] {
+			line := d.Decision
 			if d.Reason != "" {
-				fmt.Fprintf(&b, "- %s — (%s)\n", d.Decision, d.Reason)
-			} else {
-				fmt.Fprintf(&b, "- %s\n", d.Decision)
+				line += " — (" + d.Reason + ")"
 			}
+			fmt.Fprintf(&b, "- %s\n", truncate(line, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Decisions) {
+			fmt.Fprintf(&b, "- … +%d more decisions\n", len(snapshot.Decisions)-limit)
 		}
 	}
 
 	if len(snapshot.Blockers) > 0 {
 		b.WriteString("\n## Blocked\n")
-		for _, bl := range snapshot.Blockers {
-			fmt.Fprintf(&b, "- %s\n", bl.Description)
+		limit := limit(len(snapshot.Blockers), budget.MaxBlockers)
+		for _, bl := range snapshot.Blockers[:limit] {
+			fmt.Fprintf(&b, "- %s\n", truncate(bl.Description, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Blockers) {
+			fmt.Fprintf(&b, "- … +%d more blockers\n", len(snapshot.Blockers)-limit)
 		}
 	}
 
@@ -80,17 +79,53 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot) (string, error) {
 
 	if len(snapshot.Files.Modified) > 0 {
 		b.WriteString("\n## Changed files\n")
-		for _, f := range snapshot.Files.Modified {
-			fmt.Fprintf(&b, "- %s\n", f)
+		limit := limit(len(snapshot.Files.Modified), budget.MaxFiles)
+		for _, f := range snapshot.Files.Modified[:limit] {
+			fmt.Fprintf(&b, "- %s\n", truncate(f, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Files.Modified) {
+			fmt.Fprintf(&b, "- … +%d more files\n", len(snapshot.Files.Modified)-limit)
 		}
 	}
 
 	if snapshot.NextAction != "" {
 		b.WriteString("\n## Next action\n")
-		b.WriteString(snapshot.NextAction + "\n")
+		b.WriteString(truncate(snapshot.NextAction, budget.MaxItemChars) + "\n")
 	}
 
 	return b.String(), nil
+}
+
+func budgetedList(b *strings.Builder, heading string, items []string, maxItems, maxChars int) {
+	if len(items) == 0 {
+		return
+	}
+	b.WriteString("\n" + heading + "\n")
+	limit := limit(len(items), maxItems)
+	for _, item := range items[:limit] {
+		fmt.Fprintf(b, "- %s\n", truncate(item, maxChars))
+	}
+	if limit < len(items) {
+		fmt.Fprintf(b, "- … +%d more\n", len(items)-limit)
+	}
+}
+
+func limit(n, max int) int {
+	if max <= 0 || n < max {
+		return n
+	}
+	return max
+}
+
+func truncate(s string, max int) string {
+	if max <= 0 || len(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }
 
 // RenderHandoff produces the deterministic handoff context (PRD §24).

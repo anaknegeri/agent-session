@@ -37,8 +37,8 @@ func ProvideCheckpointService(store ports.Store, git ports.GitService, logger *s
 	return app.NewCheckpointService(store, git, logger)
 }
 
-func ProvideContextService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer) *app.ContextService {
-	return app.NewContextService(store, checkpoints, renderer)
+func ProvideContextService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget) *app.ContextService {
+	return app.NewContextService(store, checkpoints, renderer, budget)
 }
 
 func ProvideRenderer() ports.ContextRenderer {

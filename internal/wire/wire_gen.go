@@ -17,7 +17,7 @@ import (
 // Injectors from wire.go:
 
 // InitializeApp wires the application with a runtime store.
-func InitializeApp(store ports.Store, logger *slog.Logger) (*services.App, error) {
+func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget) (*services.App, error) {
 	gitService := providers.ProvideGitService()
 	initService := providers.ProvideInitService(store, gitService, logger)
 	sessionService := providers.ProvideSessionService(store, gitService, logger)
@@ -27,7 +27,7 @@ func InitializeApp(store ports.Store, logger *slog.Logger) (*services.App, error
 	workspaceService := providers.ProvideWorkspaceService(gitService)
 	checkpointService := providers.ProvideCheckpointService(store, gitService, logger)
 	contextRenderer := providers.ProvideRenderer()
-	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer)
+	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer, budget)
 	handoffService := providers.ProvideHandoffService(store, checkpointService, contextRenderer, logger)
 	artifactService := providers.ProvideArtifactService(store)
 	memoryService := providers.ProvideMemoryService(store, logger)

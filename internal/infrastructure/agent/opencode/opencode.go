@@ -65,7 +65,7 @@ func (a *Adapter) Configure(ctx context.Context, mcpCommand string) error {
 		agentCfg = map[string]any{}
 	}
 	agentCfg["instructions"] = map[string]any{
-		"system": "This project uses Agent Session. At the start of a session, FIRST call the agent-session MCP tools in order: session.get then context.get, and continue the existing task. Record work with task.create/task.update, decision.create, blocker.create, and event.append for test results. Before finishing, create a checkpoint with session.checkpoint including next_action.",
+		"system": "This project uses Agent Session. At the start of a session, FIRST call the agent-session MCP tools in order: session.get then context.get, and continue the existing task. Record work with task.create/task.update, decision.create, blocker.create, and event.append for test results. Before finishing, create a checkpoint with session.checkpoint including next_action, and summarize with context.summarize then memory.put (kind=project_knowledge).",
 	}
 	config["agent"] = agentCfg
 
