@@ -108,7 +108,7 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 		modified = append(modified, c.Path)
 	}
 
-	return &entities.Snapshot{
+	snapshot := &entities.Snapshot{
 		Session: entities.SessionState{
 			ID:     session.ID,
 			Title:  session.Title,
@@ -135,7 +135,15 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 		Blockers:   blockers,
 		NextAction: "",
 		LastAgent:  session.LastAgent,
-	}, nil
+	}
+
+	// surface the most recent checkpoint's next_action so resumed agents know
+	// exactly what to continue (UC-05).
+	if latest, err := s.store.Checkpoints().GetLatest(ctx, sessionID); err == nil {
+		snapshot.NextAction = latest.NextAction
+	}
+
+	return snapshot, nil
 }
 
 func (s *CheckpointService) testsState(ctx context.Context, sessionID string) entities.TestsState {
