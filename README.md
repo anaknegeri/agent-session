@@ -232,6 +232,52 @@ inject_memory  = true
 max_memory     = 3
 ```
 
+### Benchmark
+
+Reproducible benchmark at `bench/token-benchmark.sh` measures the real output
+size (in characters) of context-gathering operations, converted to approximate
+token cost (chars ÷ 4). Token estimates use the standard English-text heuristic;
+your model's exact tokenizer may differ.
+
+**Methodology** — "Without" = manual exploration an agent must do on every cold
+start / post-compaction / handoff (read README, AGENTS.md, `git log`, `git status`,
+`git diff`, glob source files). "With" = a single `context.get` call.
+
+#### Results (live run on this repo)
+
+| Scenario | Without agent-session | With agent-session | Savings |
+|---|---|---|---|
+| Cold start (first turn) | ~4,311 tokens | ~320 tokens | **93%** |
+| Post-compaction re-orientation | ~4,311 tokens | ~320 tokens | **93%** |
+| Agent handoff (Claude → Codex) | ~4,311 tokens (state lost) | ~472 tokens (state preserved) | **90%** |
+
+#### Cumulative savings over multiple re-orientations
+
+| Re-orientations | Without | With | Saved |
+|---|---|---|---|
+| 1 | 4,311 tok | 320 tok | 3,991 tok |
+| 5 | 21,555 tok | 1,600 tok | 19,955 tok |
+| 10 | 43,110 tok | 3,200 tok | **39,910 tok** |
+| 20 | 86,220 tok | 6,400 tok | 79,820 tok |
+
+#### Context depth comparison
+
+| Depth | Chars | ≈ Tokens |
+|---|---|---|
+| `summary` (default, clamped at 4000 chars) | 1,282 | 320 |
+| `recent` (bounded lists, no hard clamp) | 1,368 | 342 |
+| `full` (never truncated) | 1,872 | 468 |
+
+> "Without agent-session" is a **minimum** — in practice agents also search code,
+> read specific files, and re-derive decisions that agent-session preserves
+> structurally. Real-world savings are higher.
+
+Reproduce:
+
+```bash
+./bench/token-benchmark.sh
+```
+
 ## Configuration
 
 `.agent/config.toml` — zero-config defaults, human-editable:
