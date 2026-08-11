@@ -17,6 +17,10 @@ This project uses Agent Session (agent-session) as its session layer. Always fol
    - session.get — find the current session
    - context.get — load the current context
    Continue the existing task; do not start from scratch.
+   The context summary is a bounded preview for token savings — call
+   context.get depth=full whenever you need complete decisions, blockers,
+   changed files, or the full event list. Never act on incomplete information
+   when the detail is one tool call away.
 2. Record work as you go:
    - task.create / task.update — track the current task
    - decision.create — record architectural decisions with a reason

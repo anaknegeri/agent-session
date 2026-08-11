@@ -42,7 +42,16 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 		return "", err
 	}
 
-	text, err := s.renderer.RenderContext(snapshot, s.budget)
+	renderBudget := s.budget
+	if depth == ContextDepthFull {
+		// explicit full detail: no list truncation, no clamp
+		renderBudget = ports.ContextBudget{}
+	} else if depth == ContextDepthRecent {
+		// bounded lists but never hard-clamped
+		renderBudget.MaxTotalChars = 0
+	}
+
+	text, err := s.renderer.RenderContext(snapshot, renderBudget)
 	if err != nil {
 		return "", err
 	}
@@ -64,7 +73,12 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 		text = s.injectMemory(ctx, text, snapshot)
 	}
 
-	return clamp(text, s.budget.MaxTotalChars), nil
+	// Hard clamp only applies to the cheap summary view. Full/recent depth is
+	// explicitly requested detail and is never silently cut.
+	if depth == ContextDepthSummary {
+		text = clamp(text, s.budget.MaxTotalChars)
+	}
+	return text, nil
 }
 
 // injectMemory appends top-k related knowledge retrieved by OR full-text search
@@ -94,13 +108,14 @@ func eventLimit(max int, depth string) int {
 	return max
 }
 
-// clamp trims text to at most maxChars, keeping a trailing note.
+// clamp trims text to at most maxChars, keeping a trailing note that the full
+// state is still available on demand.
 func clamp(text string, maxChars int) string {
 	if maxChars <= 0 || len(text) <= maxChars {
 		return text
 	}
 	runes := []rune(text)
-	return string(runes[:maxChars]) + "\n… (context truncated)"
+	return string(runes[:maxChars]) + "\n… (summary clamped — call `context.get depth=full` for the complete state)"
 }
 
 func truncateString(s string, max int) string {

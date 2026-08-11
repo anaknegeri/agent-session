@@ -15,9 +15,12 @@ func NewRenderer() *renderer {
 }
 
 // RenderContext produces a budgeted, human-readable context.md (PRD §4.5).
-// Lists and strings are truncated to keep the prompt small (token savings).
+// Lists and strings are truncated to keep the summary small, but every
+// truncation is flagged with an explicit hint to fetch the full state, so the
+// agent is never silently working with incomplete information.
 func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.ContextBudget) (string, error) {
 	var b strings.Builder
+	truncated := false
 
 	b.WriteString("# Agent Session")
 	if snapshot.Session.Title != "" {
@@ -43,8 +46,8 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 		fmt.Fprintf(&b, "%s — %s\n", snapshot.Task.Title, snapshot.Task.Status)
 	}
 
-	budgetedList(&b, "## Completed", snapshot.Progress.Completed, budget.MaxProgress, budget.MaxItemChars)
-	budgetedList(&b, "## In progress", snapshot.Progress.Pending, budget.MaxProgress, budget.MaxItemChars)
+	budgetedList(&b, "## Completed", snapshot.Progress.Completed, budget.MaxProgress, budget.MaxItemChars, &truncated)
+	budgetedList(&b, "## In progress", snapshot.Progress.Pending, budget.MaxProgress, budget.MaxItemChars, &truncated)
 
 	if len(snapshot.Decisions) > 0 {
 		b.WriteString("\n## Decisions\n")
@@ -57,6 +60,7 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 			fmt.Fprintf(&b, "- %s\n", truncate(line, budget.MaxItemChars))
 		}
 		if limit < len(snapshot.Decisions) {
+			truncated = true
 			fmt.Fprintf(&b, "- … +%d more decisions\n", len(snapshot.Decisions)-limit)
 		}
 	}
@@ -68,6 +72,7 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 			fmt.Fprintf(&b, "- %s\n", truncate(bl.Description, budget.MaxItemChars))
 		}
 		if limit < len(snapshot.Blockers) {
+			truncated = true
 			fmt.Fprintf(&b, "- … +%d more blockers\n", len(snapshot.Blockers)-limit)
 		}
 	}
@@ -84,19 +89,24 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 			fmt.Fprintf(&b, "- %s\n", truncate(f, budget.MaxItemChars))
 		}
 		if limit < len(snapshot.Files.Modified) {
+			truncated = true
 			fmt.Fprintf(&b, "- … +%d more files\n", len(snapshot.Files.Modified)-limit)
 		}
 	}
 
 	if snapshot.NextAction != "" {
 		b.WriteString("\n## Next action\n")
-		b.WriteString(truncate(snapshot.NextAction, budget.MaxItemChars) + "\n")
+		b.WriteString(snapshot.NextAction + "\n")
+	}
+
+	if truncated {
+		b.WriteString("\n> Context truncated for brevity — call `context.get depth=full` for the complete state.\n")
 	}
 
 	return b.String(), nil
 }
 
-func budgetedList(b *strings.Builder, heading string, items []string, maxItems, maxChars int) {
+func budgetedList(b *strings.Builder, heading string, items []string, maxItems, maxChars int, truncated *bool) {
 	if len(items) == 0 {
 		return
 	}
@@ -106,6 +116,7 @@ func budgetedList(b *strings.Builder, heading string, items []string, maxItems, 
 		fmt.Fprintf(b, "- %s\n", truncate(item, maxChars))
 	}
 	if limit < len(items) {
+		*truncated = true
 		fmt.Fprintf(b, "- … +%d more\n", len(items)-limit)
 	}
 }

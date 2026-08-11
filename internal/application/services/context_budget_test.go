@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
+	app "github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	mdc "github.com/anaknegeri/agent-session/internal/infrastructure/context"
 )
@@ -60,6 +61,48 @@ func TestContextBudgetTruncates(t *testing.T) {
 	}
 	if !strings.Contains(text, "+3 more") {
 		t.Fatalf("expected progress truncation note, got:\n%s", text)
+	}
+	// every truncation must tell the agent how to get the full state
+	if !strings.Contains(text, "depth=full") {
+		t.Fatalf("expected fetch-more hint, got:\n%s", text)
+	}
+}
+
+func TestFullDepthNeverClamped(t *testing.T) {
+	fx := newFixture(t)
+	ctx := context.Background()
+
+	initRes, err := fx.app.Init.Init(ctx, fx.dir, "claude")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	for i := 0; i < 10; i++ {
+		if _, err := fx.app.Decision.Create(ctx, initRes.Session.ID, "decision number "+string(rune('a'+i)), "", "claude"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tiny := ports.DefaultContextBudget()
+	tiny.MaxTotalChars = 120
+	cs := app.NewContextService(fx.app.Store, fx.app.Checkpoint, mdc.NewRenderer(), tiny)
+
+	summary, err := cs.Get(ctx, initRes.Session.ID, "summary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(summary, "summary clamped") {
+		t.Fatalf("expected summary to be clamped with a hint, got:\n%s", summary)
+	}
+
+	full, err := cs.Get(ctx, initRes.Session.ID, "full")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(full, "summary clamped") {
+		t.Fatalf("full depth must never be clamped:\n%s", full)
+	}
+	if !strings.Contains(full, "decision number j") {
+		t.Fatalf("full depth should include all decisions:\n%s", full)
 	}
 }
 
