@@ -30,22 +30,66 @@ layer**: agents are interchangeable workers, and the session is the portable sta
 
 ## Install
 
-### From a release (macOS / Linux)
+Prebuilt binaries for **macOS, Linux and Windows** (`amd64` + `arm64`) are
+published on every release. Pick whichever path is easiest for you.
+
+### macOS & Linux
+
+**Homebrew** (recommended on macOS):
 
 ```bash
-curl -fsSL https://install.agent-session.dev | sh        # installs to /usr/local/bin
-AS_INSTALL_DIR=~/.local/bin curl -fsSL ... | sh          # user install, no sudo
+brew install anaknegeri/tap/agent-session
+```
+
+**One-line curl installer** (installs both `agent-session` + `agent-session-mcp`,
+auto-detects the latest version):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/anaknegeri/agent-session/main/scripts/install.sh | sh
+```
+
+Options: `AS_VERSION=0.1.2` to pin a version, `AS_INSTALL_DIR=~/.local/bin` to
+install without sudo.
+
+### Windows
+
+**PowerShell** (installs to `%LOCALAPPDATA%\agent-session` and adds it to your PATH):
+
+```powershell
+irm https://raw.githubusercontent.com/anaknegeri/agent-session/main/scripts/install.ps1 | iex
+```
+
+### Any platform with Go
+
+```bash
+go install github.com/anaknegeri/agent-session@latest
+```
+
+### From a release
+
+Grab the matching asset from the [latest release](https://github.com/anaknegeri/agent-session/releases)
+(`agent-session-{os}-{arch}`, Windows uses `.exe`), then:
+
+```bash
+chmod +x agent-session-* && sudo mv agent-session-* /usr/local/bin/
+```
+
+### Update
+
+```bash
+brew upgrade agent-session        # Homebrew installs
+agent-session update              # binary / curl installs (auto-checks GitHub releases)
 ```
 
 ### From source
 
+Requires only **Go binary + Git**:
+
 ```bash
 make build             # bin/agent-session + bin/agent-session-mcp
-make cross-compile     # dist/agent-session-{os}-{arch} (darwin/linux/windows × amd64/arm64)
 make install           # copies to ~/.local/bin
+make cross-compile     # dist/ for all 6 platform/arch combos
 ```
-
-Requires only: **Go binary + Git**.
 
 ### Global availability in Claude Code
 
