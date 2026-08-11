@@ -198,7 +198,7 @@ Large event payloads (>8KB) are stored as artifacts and referenced by `artifact_
 
 ### Long-term memory (Phase 4)
 
-Memory is separate from session state (PRD §26). The `knowledge` table is a
+Memory is separate from session state. The `knowledge` table is a
 long-term store with SQLite FTS5 (porter tokenizer) full-text search:
 
 - **Kinds** — `project_knowledge`, `architecture`, `solution`, `preference`, `skill`
@@ -211,7 +211,7 @@ long-term store with SQLite FTS5 (porter tokenizer) full-text search:
 
 ## Token savings
 
-Agent Session is designed to keep prompts small (state over transcript, PRD §25):
+Agent Session is designed to keep prompts small (state over transcript):
 
 - **Progressive context loading** — `context.get` defaults to a bounded summary,
   not full history.

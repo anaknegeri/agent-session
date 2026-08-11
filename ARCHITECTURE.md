@@ -1,6 +1,6 @@
 # Arsitektur MVP — Agent Session
 
-> Sumber: `PRD — Universal Agent Session & Handoff.md`
+> Sumber: arsitektur dan keputusan teknis
 > Keputusan: **Go** untuk core (single binary + SQLite + MCP + CLI dalam satu executable)
 > Packaging: **Agent Plugin** (agent-plugins.org v1.0.0) — MCP server di-ship sebagai stdio subprocess `./bin/agent-session-mcp`
 
@@ -15,11 +15,11 @@
 | ORM | GORM + `glebarez/sqlite` (pure-Go driver) | konsisten dengan konvensi repo, mudah tambah Postgres nanti |
 | MCP | `mark3labs/mcp-go` | stdio + Streamable HTTP, tools + resources, maintenance aktif |
 | CLI | `spf13/cobra` | ekosistem CLI standar |
-| Git | exec `git` via `GitService` interface | git adalah hard dependency produk (PRD §22); paling robust terhadap versi/config |
-| Config | `pelletier/go-toml/v2` | PRD §31 format TOML |
+| Git | exec `git` via `GitService` interface | git adalah hard dependency produk ; paling robust terhadap versi/config |
+| Config | `pelletier/go-toml/v2` | format TOML |
 | Logging | stdlib `log/slog` | CLI local-first; nol dependency tambahan, sejalan ethos single-binary |
 | DI | `google/wire` | konvensi repo (golang-clean-architecture) |
-| ID | prefiks + `google/uuid` | `sess_`, `task_`, `evt_`, `chk_` (PRD §15) |
+| ID | prefiks + `google/uuid` | `sess_`, `task_`, `evt_`, `chk_`  |
 
 ---
 
@@ -56,7 +56,7 @@ agent-session/
 │   │   ├── context/                # markdown_renderer.go — generate context.md / handoff text
 │   │   └── agent/                  # adapter.go (interface) + claude/ codex/ opencode/ plugin/
 │   │
-│   ├── config/                     # config.go — baca .agent/config.toml (PRD §31)
+│   ├── config/                     # config.go — baca .agent/config.toml 
 │   ├── providers/                  # constructor Wire provider per layer
 │   └── wire/                       # wire.go + wire_gen.go
 │
@@ -172,7 +172,7 @@ type Checkpoint struct {
     SessionID  string    `json:"session_id" db:"session_id"`
     TaskID     string    `json:"task_id,omitempty" db:"task_id"`
     Label      string    `json:"label,omitempty" db:"label"`
-    Snapshot   JSONB     `json:"snapshot" db:"snapshot"` // canonical state (PRD §15)
+    Snapshot   JSONB     `json:"snapshot" db:"snapshot"` // canonical state 
     NextAction string    `json:"next_action,omitempty" db:"next_action"`
     Agent      string    `json:"agent,omitempty" db:"agent"`
     CreatedAt  time.Time `json:"created_at" db:"created_at"`
@@ -291,7 +291,7 @@ CREATE TABLE artifacts (
 );
 ```
 
-Storage dibuat mengikuti PRD §17: `Store` interface + `SQLiteStore` (PostgresStore bisa ditambahkan tanpa menyentuh service).
+Storage dibuat mengikuti pola `Store` interface + `SQLiteStore` (PostgresStore bisa ditambahkan tanpa menyentuh service).
 
 ---
 
@@ -300,7 +300,7 @@ Storage dibuat mengikuti PRD §17: `Store` interface + `SQLiteStore` (PostgresSt
 | Service | Tanggung jawab | Command/MCP tools |
 |---|---|---|
 | `SessionService` | create/resume/status/handoff/lifecycle, atur `last_agent`, buka+tutup `agent_sessions` | `session.get`, `session.resume`, CLI `start/resume/status` |
-| `CheckpointService` | buat snapshot canonical (PRD §15), simpan `checkpoints`, auto-checkpoint, restore | `session.checkpoint`, CLI `checkpoint` |
+| `CheckpointService` | buat snapshot canonical , simpan `checkpoints`, auto-checkpoint, restore | `session.checkpoint`, CLI `checkpoint` |
 | `MemoryService` | put/get/search/delete knowledge (FTS5) + promote non-LLM dari decision/blocker/task | `memory.*`, CLI `memory` |
 | `EventService` | append `session_events` (canonical event §14.3), query recent | `event.append`, CLI `history` |
 | `TaskService` | create/update task, set `current_task_id` | `task.get`, `task.update` |
@@ -319,7 +319,7 @@ Storage dibuat mengikuti PRD §17: `Store` interface + `SQLiteStore` (PostgresSt
 
 **`resume`** → restore session + latest checkpoint → render context → set `agent_sessions.started_at` baru → output.
 
-### Canonical event types (PRD §14.3/§21)
+### Canonical event types
 
 ```
 session.started  task.created     task.updated
@@ -337,7 +337,7 @@ Payload besar → `artifacts` (referensi, bukan isi penuh).
 
 Bootstrap via `cmd/agent-session-mcp`: deteksi transport dari env `--transport stdio|streamable-http` (default stdio). Runtime: jalankan di cwd project, cari `.agent/session.db` di cwd (walk ke atas untuk nested dir, sampai `.agent` atau git root).
 
-### Tools (PRD §18)
+### Tools 
 
 | Tool | Skema input (ringkas) |
 |---|---|
@@ -363,9 +363,9 @@ Bootstrap via `cmd/agent-session-mcp`: deteksi transport dari env `--transport s
 | `memory.delete` | `memory_id` |
 | `memory.promote` | extract decision→architecture, blocker resolved→project_knowledge, task completed→solution |
 
-Auto-checkpoint (config `[session] auto_checkpoint = true`, default on) dibuat setelah `task.create`, `task.update`, `decision.create`, dan `test.passed` (PRD §23).
+Auto-checkpoint (config `[session] auto_checkpoint = true`, default on) dibuat setelah `task.create`, `task.update`, `decision.create`, dan `test.passed` .
 
-### Resources (PRD §19)
+### Resources 
 
 ```
 session://current              → ringkasan session aktif
@@ -376,7 +376,7 @@ session://workspace            → branch/commit/dirty/stat
 session://checkpoint/latest    → snapshot JSON terakhir
 ```
 
-Semua resource bisa dibaca agent tanpa tool call berulang → hemat token (PRD §25).
+Semua resource bisa dibaca agent tanpa tool call berulang → hemat token .
 
 ---
 
@@ -423,9 +423,9 @@ plugin/
     └── opencode/ opencode.json        (mcp server)
 ```
 
-**Kenapa ini penting:** `command: "./bin/agent-session-mcp"` adalah executable self-contained tanpa runtime host — memenuhi PRD §30 (tanpa Node/Python/Docker) dan Agent Plugins spec §7.2.1 (command single token, no placeholder expansion).
+**Kenapa ini penting:** `command: "./bin/agent-session-mcp"` adalah executable self-contained tanpa runtime host — memenuhi persyaratan (tanpa Node/Python/Docker) dan Agent Plugins spec §7.2.1 (command single token, no placeholder expansion).
 
-### Adapter (PRD §20) — `internal/infrastructure/agent/adapter.go`
+### Adapter  — `internal/infrastructure/agent/adapter.go`
 
 ```go
 type AgentAdapter interface {
@@ -450,7 +450,7 @@ CLI `agent-session plugin install|uninstall` memanggil adapter di atas.
 
 ## 7. Context & Handoff Format
 
-### `context.md` (human-readable, PRD §4.5)
+### `context.md` (human-readable)
 
 Dihasilkan `ContextService` + `markdown_renderer`:
 
@@ -482,11 +482,11 @@ Dihasilkan `ContextService` + `markdown_renderer`:
 <next_action>
 ```
 
-### Handoff payload (deterministik, PRD §24)
+### Handoff payload (deterministik)
 
-`HandoffService` menyusun YAML dari canonical state — output CLI ditampilkan dan/atau ditulis ke `.agent/handoffs/<from>-to-<to>-<ts>.md`. Format sama persis PRD §24.
+`HandoffService` menyusun YAML dari canonical state — output CLI ditampilkan dan/atau ditulis ke `.agent/handoffs/<from>-to-<to>-<ts>.md`. Format deterministik.
 
-### Progressive loading (PRD §25)
+### Progressive loading 
 
 `context.get depth=summary` → current task + latest checkpoint + decisions + blockers + git summary + recent events (≤ N). `depth=recent|full` baru mengambil detail/artifacts.
 
@@ -494,10 +494,10 @@ Dihasilkan `ContextService` + `markdown_renderer`:
 
 ## 8. CLI (`cli/` + `cmd/agent-session`)
 
-| Command | Fungsi | Mapping PRD |
+| Command | Fungsi |
 |---|---|---|
 | `agent-session init` | deteksi project, buat `.agent/` + db + session | UC-01 |
-| `agent-session status` | tampilkan state (format PRD §29) | UC contoh |
+| `agent-session status` | tampilkan state  | UC contoh |
 | `agent-session start` | mulai/buat session baru | — |
 | `agent-session resume` | resume session terakhir / by id | UC-05 |
 | `agent-session checkpoint` | snapshot manual | UC-03 |
@@ -508,7 +508,7 @@ Dihasilkan `ContextService` + `markdown_renderer`:
 | `agent-session mcp` | jalankan MCP server (stdio) | — |
 | `agent-session plugin install|uninstall|pack` | kelola Agent Plugin | §20 |
 
-Format output `status` mengikuti contoh PRD §29 (progres, completed ✓, blocked ✗, next).
+Format output `status` mengikuti contoh (progres, completed ✓, blocked ✗, next).
 
 ---
 
@@ -542,7 +542,7 @@ mode = "local-only"   # local-only | git-sync | cloud-sync (phase 2)
 
 ---
 
-## 10. Urutan Pengembangan (per PRD §44, diterjemahkan ke tasks)
+## 10. Urutan Pengembangan
 
 | Step | Deliverable | Verifikasi |
 |---|---|---|
@@ -573,9 +573,9 @@ Cross-cutting sejak step 1: **Wire DI**, **slog**, config loader, `pkg/appdir`.
 
 ---
 
-## 12. Mapping Definition of Done (PRD §43)
+## 12. Mapping Definition of Done
 
-| PRD DoD | Di mana dipenuhi |
+| DoD | Di mana dipenuhi |
 |---|---|
 | 1. Satu binary | `cmd/agent-session` (CLI + MCP via subcommand) |
 | 2. `init` | CLI `init` |
