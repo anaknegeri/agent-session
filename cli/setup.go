@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
@@ -16,10 +17,24 @@ func newSetupCmd() *cobra.Command {
 	var only string
 	cmd := &cobra.Command{
 		Use:   "setup",
-		Short: "Make every agent use Agent Session automatically (AGENTS.md + adapters)",
-		Args:  cobra.NoArgs,
+		Short: "One-command setup: init the project (if needed) and wire every agent",
+		Long: "Initializes the project if it has no .agent yet, then wires the\n" +
+			"always-on integration for every agent (AGENTS.md, claude, opencode, codex).\n" +
+			"Run once per project.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := cwd()
+			bin := selfPath()
+
+			// init if needed (one command, no separate `init` required)
+			if _, err := bootstrap.Open("."); err != nil {
+				if _, err := bootstrap.Init(dir, "cli"); err != nil {
+					return err
+				}
+				fmt.Printf("✓ project initialized\n")
+			} else {
+				fmt.Printf("✓ project already initialized\n")
+			}
 
 			path, err := agent.EnsureAGENTSMD(dir)
 			if err != nil {
@@ -31,7 +46,6 @@ func newSetupCmd() *cobra.Command {
 				fmt.Printf("✓ AGENTS.md already has Agent Session instructions\n")
 			}
 
-			bin := selfPath()
 			if only == "" || only == "claude" {
 				installClaude(dir, bin)
 			}
@@ -41,6 +55,7 @@ func newSetupCmd() *cobra.Command {
 			if only == "" || only == "codex" {
 				installCodex(bin)
 			}
+			fmt.Printf("done. agent-session is now active in this project.\n")
 			return nil
 		},
 	}

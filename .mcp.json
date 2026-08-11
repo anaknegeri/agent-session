@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "agent-session": {
+      "args": [
+        "mcp"
+      ],
+      "command": "/Users/herupras/.local/bin/agent-session",
+      "env": {
+        "AGENT_SESSION_AGENT": "claude"
+      },
+      "type": "stdio"
+    }
+  }
+}
