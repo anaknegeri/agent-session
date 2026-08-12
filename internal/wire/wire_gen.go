@@ -9,6 +9,7 @@ package wire
 import (
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/providers"
 	"github.com/google/wire"
 	"log/slog"
@@ -17,7 +18,7 @@ import (
 // Injectors from wire.go:
 
 // InitializeApp wires the application with a runtime store.
-func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget) (*services.App, error) {
+func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget, retention config.RetentionConfig) (*services.App, error) {
 	gitService := providers.ProvideGitService()
 	initService := providers.ProvideInitService(store, gitService, logger)
 	sessionService := providers.ProvideSessionService(store, gitService, logger)
@@ -25,7 +26,7 @@ func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextB
 	decisionService := providers.ProvideDecisionService(store, logger)
 	eventService := providers.ProvideEventService(store)
 	workspaceService := providers.ProvideWorkspaceService(gitService)
-	checkpointService := providers.ProvideCheckpointService(store, gitService, logger)
+	checkpointService := providers.ProvideCheckpointService(store, gitService, logger, retention)
 	contextRenderer := providers.ProvideRenderer()
 	artifactService := providers.ProvideArtifactService(store)
 	syncService := providers.ProvideSyncService(store, gitService, artifactService, logger)

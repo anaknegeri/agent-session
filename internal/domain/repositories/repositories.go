@@ -51,6 +51,9 @@ type CheckpointRepository interface {
 	GetByID(ctx context.Context, id string) (*entities.Checkpoint, error)
 	GetLatest(ctx context.Context, sessionID string) (*entities.Checkpoint, error)
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]*entities.Checkpoint, error)
+	// PruneKind removes the oldest checkpoints of one kind beyond keep, always
+	// preserving the session's most recent checkpoint.
+	PruneKind(ctx context.Context, sessionID, kind string, keep int) (int, error)
 }
 
 type AgentSessionRepository interface {

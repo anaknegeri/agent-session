@@ -25,6 +25,9 @@ type Config struct {
 	Git     GitConfig     `toml:"git"`
 	Agents  AgentsConfig  `toml:"agents"`
 	Sync    SyncConfig    `toml:"sync"`
+	// Retention bounds checkpoint growth. A long session produced 85 checkpoints
+	// averaging 7.5 KB of snapshot each with no limit at all.
+	Retention RetentionConfig `toml:"retention"`
 }
 
 type ProjectConfig struct {
@@ -51,6 +54,33 @@ type ContextConfig struct {
 	MaxTotalChars int  `toml:"max_total_chars"`
 	InjectMemory  bool `toml:"inject_memory"`
 	MaxMemory     int  `toml:"max_memory"`
+}
+
+// RetentionConfig caps how many checkpoints of each kind a session keeps. Limits
+// are per kind so a burst of automatic checkpoints cannot evict the deliberate
+// ones. A value of 0 or less means keep everything.
+type RetentionConfig struct {
+	MaxManual     int `toml:"max_manual"`
+	MaxAuto       int `toml:"max_auto"`
+	MaxPreCompact int `toml:"max_precompact"`
+	MaxHandoff    int `toml:"max_handoff"`
+}
+
+// CheckpointLimit returns the retained count for a checkpoint kind, or 0 when the
+// kind is unbounded or unknown.
+func (r RetentionConfig) CheckpointLimit(kind string) int {
+	switch kind {
+	case "manual":
+		return r.MaxManual
+	case "auto":
+		return r.MaxAuto
+	case "precompact":
+		return r.MaxPreCompact
+	case "handoff":
+		return r.MaxHandoff
+	default:
+		return 0
+	}
 }
 
 type GitConfig struct {
@@ -95,6 +125,12 @@ func Default() *Config {
 			OpenCode: AgentConfig{Enabled: true},
 		},
 		Sync: SyncConfig{Mode: SyncModeLocal},
+		Retention: RetentionConfig{
+			MaxManual:     50,
+			MaxAuto:       20,
+			MaxPreCompact: 10,
+			MaxHandoff:    20,
+		},
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	app "github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/config"
 	mdc "github.com/anaknegeri/agent-session/internal/infrastructure/context"
 	gitrunner "github.com/anaknegeri/agent-session/internal/infrastructure/git"
 )
@@ -33,8 +34,8 @@ func ProvideWorkspaceService(git ports.GitService) *app.WorkspaceService {
 	return app.NewWorkspaceService(git)
 }
 
-func ProvideCheckpointService(store ports.Store, git ports.GitService, logger *slog.Logger) *app.CheckpointService {
-	return app.NewCheckpointService(store, git, logger)
+func ProvideCheckpointService(store ports.Store, git ports.GitService, logger *slog.Logger, retention config.RetentionConfig) *app.CheckpointService {
+	return app.NewCheckpointService(store, git, logger, retention)
 }
 
 func ProvideContextService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget, sync *app.SyncService, git ports.GitService) *app.ContextService {

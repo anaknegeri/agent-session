@@ -46,7 +46,7 @@ func Init(dir, agent string) (*App, error) {
 
 	log := logger.New("info")
 	cfg := config.Default()
-	wired, err := wire.InitializeApp(store, log, contextBudget(cfg))
+	wired, err := wire.InitializeApp(store, log, contextBudget(cfg), cfg.Retention)
 	if err != nil {
 		return nil, fmt.Errorf("wire app: %w", err)
 	}
@@ -99,7 +99,7 @@ func Open(dir string) (*App, error) {
 	}
 
 	log := logger.New("info")
-	wired, err := wire.InitializeApp(store, log, contextBudget(cfg))
+	wired, err := wire.InitializeApp(store, log, contextBudget(cfg), cfg.Retention)
 	if err != nil {
 		return nil, fmt.Errorf("wire app: %w", err)
 	}

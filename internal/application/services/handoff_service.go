@@ -50,7 +50,7 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 	}
 
 	from := session.LastAgent
-	cp, err := s.checkpoints.Create(ctx, sessionID, "handoff", "", from)
+	cp, err := s.checkpoints.CreateKind(ctx, sessionID, entities.CheckpointKindHandoff, "handoff", "", from)
 	if err != nil {
 		return "", err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -68,28 +69,72 @@ func TestMigrateIdempotent(t *testing.T) {
 	}
 }
 
+// legacySchema builds a database the way the pre-versioned single-file
+// migrations.sql did: every table exists, nothing is recorded in
+// schema_migrations.
+func legacySchema(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms {
+		if m.version != "001" {
+			continue
+		}
+		if err := db.Exec(m.sql).Error; err != nil {
+			t.Fatalf("build legacy schema: %v", err)
+		}
+	}
+}
+
 // TestMigrateLegacyUpgrade simulates an old database created by the legacy
 // single-file schema: tables exist, but schema_migrations has no rows. Migrate
-// must record 001 without re-running it.
+// must record 001 without re-running it, then apply anything newer.
 func TestMigrateLegacyUpgrade(t *testing.T) {
 	db := newTestDB(t)
-
-	// simulate the legacy schema: create the projects table but no schema_migrations
-	if err := db.Exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')))`).Error; err != nil {
-		t.Fatalf("create legacy projects table: %v", err)
-	}
+	legacySchema(t, db)
 
 	if err := Migrate(db); err != nil {
 		t.Fatalf("migrate legacy db: %v", err)
 	}
 
-	// the legacy DB must be recorded as already at 001
+	// 001 must be recorded as already applied, and later versions actually applied
 	var count int64
-	if err := db.Table("schema_migrations").Count(&count).Error; err != nil {
+	if err := db.Table("schema_migrations").Where("version = ?", "001").Count(&count).Error; err != nil {
 		t.Fatalf("count: %v", err)
 	}
 	if count != 1 {
-		t.Fatalf("expected exactly 1 recorded migration for legacy db, got %d", count)
+		t.Fatalf("expected 001 recorded once for legacy db, got %d", count)
+	}
+
+	// the kind column from 002 must exist on the legacy database too
+	var kind string
+	if err := db.Raw(`SELECT COALESCE((SELECT kind FROM checkpoints LIMIT 1), 'none')`).Scan(&kind).Error; err != nil {
+		t.Fatalf("002 was not applied to the legacy database: %v", err)
+	}
+}
+
+// TestMigratePartialSchemaIsRejected covers a database that holds some of the
+// legacy tables but not all — an interrupted first run under the old
+// non-transactional schema script. Declaring it migrated skipped 001 and left the
+// next migration's ALTER pointing at a table that was never created, producing a
+// database that could not be opened. It must fail with an explanation instead.
+func TestMigratePartialSchemaIsRejected(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.Exec(`CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, path TEXT NOT NULL UNIQUE)`).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	err := Migrate(db)
+	if err == nil {
+		t.Fatal("expected an error for a partially initialized database")
+	}
+	if !strings.Contains(err.Error(), "partially initialized") {
+		t.Errorf("error should explain the partial schema, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "checkpoints") {
+		t.Errorf("error should name the missing tables, got: %v", err)
 	}
 }
 
@@ -211,5 +256,78 @@ func TestMigrateConcurrentPendingUpgrade(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("expected pending version applied exactly once, got %d", n)
+	}
+}
+
+// TestMigrate002BackfillsCheckpointKind exercises the versioned engine on a real
+// ALTER TABLE — the case the engine was built for — and checks the backfill maps
+// the labels the hooks and services were already writing.
+func TestMigrate002BackfillsCheckpointKind(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "backfill.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// migrate to 001 only, then insert rows as the pre-kind code would have
+	ms, err := loadMigrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first []migration
+	for _, m := range ms {
+		if m.version == "001" {
+			first = append(first, m)
+		}
+	}
+	if len(first) != 1 {
+		t.Fatalf("expected migration 001, found %d", len(first))
+	}
+	if err := migrate(context.Background(), db, first); err != nil {
+		t.Fatalf("migrate 001: %v", err)
+	}
+
+	if err := db.Exec(`INSERT INTO projects (id, name, path) VALUES ('p1','p','/p')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, branch) VALUES ('s1','p1','t','active','main')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	labels := map[string]string{
+		"c1": "auto",
+		"c2": "auto-checkpoint (stale)",
+		"c3": "precompact",
+		"c4": "handoff",
+		"c5": "v0.1.5 released",
+		"c6": "",
+	}
+	for id, label := range labels {
+		if err := db.Exec(`INSERT INTO checkpoints (id, session_id, label, snapshot) VALUES (?,?,?,'{}')`,
+			id, "s1", label).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// now apply everything, which must include 002
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate to head: %v", err)
+	}
+
+	want := map[string]string{
+		"c1": "auto",
+		"c2": "auto",
+		"c3": "precompact",
+		"c4": "handoff",
+		"c5": "manual",
+		"c6": "manual",
+	}
+	for id, kind := range want {
+		var got string
+		if err := db.Raw(`SELECT kind FROM checkpoints WHERE id = ?`, id).Scan(&got).Error; err != nil {
+			t.Fatalf("read kind for %s: %v", id, err)
+		}
+		if got != kind {
+			t.Errorf("checkpoint %s (label %q) kind = %q, want %q", id, labels[id], got, kind)
+		}
 	}
 }

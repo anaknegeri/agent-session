@@ -302,7 +302,19 @@ max_item_chars = 200
 max_total_chars = 4000
 inject_memory  = true
 max_memory     = 3
+
+# How many checkpoints of each kind a session keeps. Limits are per kind so a
+# burst of automatic checkpoints cannot evict the deliberate ones. 0 = unlimited.
+[retention]
+max_manual     = 50
+max_auto       = 20
+max_precompact = 10
+max_handoff    = 20
 ```
+
+Every checkpoint records what triggered it — `manual`, `auto` (Stop hook or a
+stale context), `precompact`, or `handoff` — and retention is applied per kind.
+The session's most recent checkpoint is never pruned.
 
 ## Automatic recording & nudges
 

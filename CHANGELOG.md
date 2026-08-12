@@ -43,6 +43,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   items, so they cannot open a heading, quote, or fence. Covered by regression
   tests over `context.get` at every depth and over `handoff`.
 
+### Added
+- **P2: checkpoint kinds and retention** — checkpoints record what triggered them
+  (`manual`, `auto`, `precompact`, `handoff`) in their own `kind` column instead of
+  leaving it implied by a free-text label, and each kind has its own retention
+  limit under `[retention]` in `.agent/config.toml` (defaults: 50 manual, 20 auto,
+  10 precompact, 20 handoff; 0 disables). Limits are per kind so a burst of
+  automatic checkpoints cannot evict the deliberate ones, and the session's most
+  recent checkpoint is never pruned. Measured on a real session before this
+  existed: 85 checkpoints averaging 7.5 KB of snapshot each, ~637 KB, unbounded —
+  with labels doing double duty as both trigger and description, one of them
+  holding an entire decision. Migration 002 adds the column and backfills it from
+  the labels already written. Retention failures are logged, never fatal: a
+  checkpoint is not lost to housekeeping.
+
 ### Changed
 - **P2: one git subprocess instead of six per workspace status** — `Status` spawned
   `branch --show-current`, two `rev-parse`, and then `DiffStat`'s own `rev-parse`,
@@ -59,6 +73,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   save. `Diff` still returns empty there, since there is no HEAD to diff against.
 
 ### Fixed
+- **A partially initialized database was declared already migrated** — legacy
+  detection checked for a single table, so a database left incomplete by an
+  interrupted first run under the old non-transactional schema script was recorded
+  as being at 001. Migration 001 was then skipped and the next migration's
+  `ALTER TABLE` pointed at a table that had never been created, leaving a database
+  that could not be opened at all. Detection now requires every table 001 creates
+  and reports a partial schema with the missing tables named, instead of migrating
+  it into an unusable state. Found by adding migration 002.
 - **Punctuation in a search query zeroed the results** — `memory.search` split on
   whitespace and quoted every fragment, so the `/` in `OAuth2 / PKCE` and the `+`
   in `PostgreSQL + TimescaleDB` became their own terms. A quoted term holding no

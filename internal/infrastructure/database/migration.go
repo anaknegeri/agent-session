@@ -73,17 +73,51 @@ func appliedVersions(ctx context.Context, conn *sql.Conn) (map[string]bool, erro
 	return applied, nil
 }
 
-// legacySchemaDetected reports whether tables were created by the pre-versioned
-// migrations.sql (CREATE TABLE IF NOT EXISTS) that never recorded a version.
-// When true, the engine records the legacy schema as applied without running it.
+// legacyTables are every table migration 001 creates. A database from the
+// pre-versioned era has all of them and no schema_migrations rows.
+var legacyTables = []string{
+	"projects", "sessions", "tasks", "decisions", "blockers",
+	"session_events", "checkpoints", "agent_sessions", "artifacts",
+	"knowledge", "knowledge_fts",
+}
+
+// legacySchemaDetected reports whether the tables were created by the
+// pre-versioned migrations.sql, which never recorded a version. When true, the
+// engine records 001 as applied without re-running it.
+//
+// It requires every table, not just one. Checking a single table meant a
+// partially created database was declared migrated, so 001 was skipped and the
+// next migration's ALTER hit a table that was never created — leaving a database
+// that could not be opened at all. A partial schema is reported as an error
+// instead, since 001 can no longer be re-run over existing tables.
 func legacySchemaDetected(ctx context.Context, conn *sql.Conn) (bool, error) {
-	var n int
-	err := conn.QueryRowContext(ctx,
-		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'projects'`).Scan(&n)
-	if err != nil {
-		return false, fmt.Errorf("detect legacy schema: %w", err)
+	present := make([]string, 0, len(legacyTables))
+	missing := make([]string, 0, len(legacyTables))
+	for _, table := range legacyTables {
+		var n int
+		err := conn.QueryRowContext(ctx,
+			`SELECT count(*) FROM sqlite_master WHERE type IN ('table','view') AND name = ?`, table).Scan(&n)
+		if err != nil {
+			return false, fmt.Errorf("detect legacy schema: %w", err)
+		}
+		if n > 0 {
+			present = append(present, table)
+		} else {
+			missing = append(missing, table)
+		}
 	}
-	return n > 0, nil
+
+	switch {
+	case len(present) == 0:
+		return false, nil
+	case len(missing) == 0:
+		return true, nil
+	default:
+		return false, fmt.Errorf(
+			"database is partially initialized: %d of %d tables exist (missing: %s). "+
+				"Restore a backup, or remove .agent/session.db to start a fresh session store",
+			len(present), len(legacyTables), strings.Join(missing, ", "))
+	}
 }
 
 // migrate applies pending versioned migrations. A database created by the old

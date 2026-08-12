@@ -47,7 +47,7 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 	if haveStatus && s.sync != nil {
 		s.sync.SyncFileChanges(ctx, sessionID, "sync", status)
 		if s.sync.IsStale(ctx, sessionID, status) {
-			s.checkpoints.Create(ctx, sessionID, "auto-checkpoint (stale)", "", "sync")
+			s.checkpoints.CreateKind(ctx, sessionID, entities.CheckpointKindAuto, "auto-checkpoint (stale)", "", "sync")
 		}
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	app "github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/providers"
 )
 
@@ -33,7 +34,7 @@ var appSet = wire.NewSet(
 )
 
 // InitializeApp wires the application with a runtime store.
-func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget) (*app.App, error) {
+func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget, retention config.RetentionConfig) (*app.App, error) {
 	wire.Build(appSet)
 	return &app.App{}, nil
 }

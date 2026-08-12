@@ -8,6 +8,7 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	app "github.com/anaknegeri/agent-session/internal/application/services"
+	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/database"
 	"github.com/anaknegeri/agent-session/internal/wire"
 	"github.com/anaknegeri/agent-session/pkg/logger"
@@ -20,6 +21,12 @@ type fixture struct {
 
 // newFixture creates a git repo and a wired app backed by :memory: SQLite.
 func newFixture(t *testing.T) *fixture {
+	return newFixtureWithRetention(t, 0)
+}
+
+// newFixtureWithRetention is newFixture with a checkpoint retention limit applied
+// to every kind. A limit of 0 keeps everything.
+func newFixtureWithRetention(t *testing.T, keepPerKind int) *fixture {
 	t.Helper()
 	dir := t.TempDir()
 	gitCmd(t, dir, "init", "-q", "-b", "main")
@@ -35,7 +42,13 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { store.Close() })
 
-	app, err := wire.InitializeApp(store, logger.New("error"), ports.DefaultContextBudget())
+	retention := config.RetentionConfig{
+		MaxManual:     keepPerKind,
+		MaxAuto:       keepPerKind,
+		MaxPreCompact: keepPerKind,
+		MaxHandoff:    keepPerKind,
+	}
+	app, err := wire.InitializeApp(store, logger.New("error"), ports.DefaultContextBudget(), retention)
 	if err != nil {
 		t.Fatal(err)
 	}

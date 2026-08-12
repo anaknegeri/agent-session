@@ -90,6 +90,40 @@ func (s *checkpointStore) ListBySession(ctx context.Context, sessionID string, l
 	return checkpoints, nil
 }
 
+// PruneKind deletes the oldest checkpoints of one kind beyond keep and returns
+// how many rows were removed.
+//
+// The session's most recent checkpoint is excluded whatever its kind, because
+// resume and restore read that one. For the current caller — which prunes the
+// kind it has just written — that exclusion is redundant, since the newest row is
+// always among the newest of its own kind; it guards a caller that prunes a kind
+// other than the one just created, such as a retention sweep.
+func (s *checkpointStore) PruneKind(ctx context.Context, sessionID, kind string, keep int) (int, error) {
+	if keep <= 0 {
+		return 0, nil
+	}
+	res := s.db.WithContext(ctx).Exec(`
+		DELETE FROM checkpoints
+		WHERE session_id = ? AND kind = ?
+		  AND id NOT IN (
+		      SELECT id FROM checkpoints
+		      WHERE session_id = ? AND kind = ?
+		      ORDER BY created_at DESC, id DESC
+		      LIMIT ?
+		  )
+		  AND id <> (
+		      SELECT id FROM checkpoints
+		      WHERE session_id = ?
+		      ORDER BY created_at DESC, id DESC
+		      LIMIT 1
+		  )`,
+		sessionID, kind, sessionID, kind, keep, sessionID)
+	if res.Error != nil {
+		return 0, fmt.Errorf("prune checkpoints: %w", res.Error)
+	}
+	return int(res.RowsAffected), nil
+}
+
 var (
 	_ repositories.EventRepository      = (*eventStore)(nil)
 	_ repositories.CheckpointRepository = (*checkpointStore)(nil)

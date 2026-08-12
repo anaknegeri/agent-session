@@ -7,23 +7,36 @@ import (
 	"log/slog"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
+	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
 type CheckpointService struct {
-	store  ports.Store
-	git    ports.GitService
-	logger *slog.Logger
+	store     ports.Store
+	git       ports.GitService
+	logger    *slog.Logger
+	retention config.RetentionConfig
 }
 
-func NewCheckpointService(store ports.Store, git ports.GitService, logger *slog.Logger) *CheckpointService {
-	return &CheckpointService{store: store, git: git, logger: logger}
+func NewCheckpointService(store ports.Store, git ports.GitService, logger *slog.Logger, retention config.RetentionConfig) *CheckpointService {
+	return &CheckpointService{store: store, git: git, logger: logger, retention: retention}
 }
 
-// Create builds the canonical snapshot (PRD §15) and stores it.
+// Create builds the canonical snapshot (PRD §15) and stores it, inferring the
+// kind from the label. Hooks installed before checkpoints had a kind pass only
+// `--label auto` or `--label precompact`, so the label still has to resolve.
 func (s *CheckpointService) Create(ctx context.Context, sessionID, label, nextAction, agent string) (*entities.Checkpoint, error) {
+	return s.CreateKind(ctx, sessionID, entities.CheckpointKindFor(label), label, nextAction, agent)
+}
+
+// CreateKind stores a checkpoint with an explicit kind and applies retention for
+// that kind, so automatic checkpoints cannot crowd out deliberate ones.
+func (s *CheckpointService) CreateKind(ctx context.Context, sessionID, kind, label, nextAction, agent string) (*entities.Checkpoint, error) {
+	if !entities.ValidCheckpointKind(kind) {
+		kind = entities.CheckpointKindManual
+	}
 	snapshot, err := s.BuildSnapshot(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -41,6 +54,7 @@ func (s *CheckpointService) Create(ctx context.Context, sessionID, label, nextAc
 		ID:         ids.New("chk"),
 		SessionID:  sessionID,
 		TaskID:     snapshot.Task.ID,
+		Kind:       kind,
 		Label:      label,
 		Snapshot:   string(data),
 		NextAction: snapshot.NextAction,
@@ -48,6 +62,15 @@ func (s *CheckpointService) Create(ctx context.Context, sessionID, label, nextAc
 	}
 	if err := s.store.Checkpoints().Create(ctx, cp); err != nil {
 		return nil, err
+	}
+
+	if keep := s.retention.CheckpointLimit(kind); keep > 0 {
+		if pruned, perr := s.store.Checkpoints().PruneKind(ctx, sessionID, kind, keep); perr != nil {
+			// retention is housekeeping; a failure must not lose the checkpoint
+			s.logger.Warn("checkpoint retention failed", "session_id", sessionID, "kind", kind, "error", perr)
+		} else if pruned > 0 {
+			s.logger.Info("checkpoints pruned", "session_id", sessionID, "kind", kind, "pruned", pruned, "keep", keep)
+		}
 	}
 
 	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
