@@ -12,7 +12,7 @@ import (
 // diskFixture creates a real git repo and initializes agent-session on disk,
 // so multiple app instances can open the same SQLite DB (process-like sharing).
 type diskFixture struct {
-	dir     string
+	dir       string
 	sessionID string
 	projectID string
 }

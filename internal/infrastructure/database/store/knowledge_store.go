@@ -3,12 +3,12 @@ package store
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"gorm.io/gorm"
 
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	"github.com/anaknegeri/agent-session/internal/domain/repositories"
+	"github.com/anaknegeri/agent-session/pkg/ftsquery"
 )
 
 type knowledgeStore struct {
@@ -95,17 +95,9 @@ func (s *knowledgeStore) search(ctx context.Context, match string, limit int) ([
 }
 
 // ftsMatch turns a user query into an FTS5 query joined by the operator
-// ("AND" or "OR") of quoted terms, so "refresh token" finds "refresh tokens".
+// ("AND" or "OR"), so "refresh token" finds "refresh tokens".
 func ftsMatch(query, operator string) (string, error) {
-	terms := strings.Fields(query)
-	if len(terms) == 0 {
-		return "", fmt.Errorf("empty search query")
-	}
-	parts := make([]string, 0, len(terms))
-	for _, term := range terms {
-		parts = append(parts, `"`+term+`"`)
-	}
-	return strings.Join(parts, " "+operator+" "), nil
+	return ftsquery.Build(query, operator)
 }
 
 func (s *knowledgeStore) Delete(ctx context.Context, id string) error {

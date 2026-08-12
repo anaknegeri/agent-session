@@ -59,6 +59,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   save. `Diff` still returns empty there, since there is no HEAD to diff against.
 
 ### Fixed
+- **Punctuation in a search query zeroed the results** — `memory.search` split on
+  whitespace and quoted every fragment, so the `/` in `OAuth2 / PKCE` and the `+`
+  in `PostgreSQL + TimescaleDB` became their own terms. A quoted term holding no
+  letter or digit produces no tokens and therefore matches nothing, so ANDing it
+  returned zero hits even though both real terms were indexed. Query building moved
+  to `pkg/ftsquery`, which drops unindexable fragments, keeps `"quoted phrases"`
+  together, supports `prefix*` search, escapes quotes, and reports a query with
+  nothing searchable instead of silently matching nothing. Verified against real
+  FTS5, not just as string shapes. `C++` and `C` still tokenize identically — that
+  is the tokenizer, not the query layer.
 - **Renamed files produced a path that did not exist** — `git diff HEAD --name-status`
   prints `R100\told\tnew`, and splitting on the first tab left `old\tnew` as the
   path and `R100` as the status. That bogus path flowed into `files.modified` in
