@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -56,7 +57,16 @@ func TestRealMCPOverStdio(t *testing.T) {
 	initCLI(t, dir)
 
 	bin := mcpBinary(t)
-	client_, err := client.NewStdioMCPClient(bin, nil, "mcp")
+	// start the MCP server with the temp project as its working directory, so
+	// it resolves that project's .agent/ (CI runs from a different cwd)
+	client_, err := client.NewStdioMCPClientWithOptions(bin, nil, []string{"mcp"},
+		transport.WithCommandFunc(func(ctx context.Context, command string, env []string, args []string) (*exec.Cmd, error) {
+			cmd := exec.CommandContext(ctx, command, args...)
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), env...)
+			return cmd, nil
+		}),
+	)
 	if err != nil {
 		t.Fatalf("start stdio mcp client: %v", err)
 	}
