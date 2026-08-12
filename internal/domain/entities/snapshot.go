@@ -2,17 +2,18 @@ package entities
 
 // Snapshot is the canonical session state stored in a checkpoint (PRD §15).
 type Snapshot struct {
-	Session    SessionState   `json:"session"`
-	Workspace  WorkspaceState `json:"workspace"`
-	Task       TaskState      `json:"task"`
-	Progress   ProgressState  `json:"progress"`
-	Decisions  []*Decision    `json:"decisions"`
-	Files      FilesState     `json:"files"`
-	Tests      TestsState     `json:"tests"`
-	Blockers   []*Blocker     `json:"blockers"`
-	NextAction string         `json:"next_action"`
-	LastAgent  string         `json:"last_agent"`
-	Nudges     []string       `json:"nudges,omitempty"`
+	Session          SessionState   `json:"session"`
+	Workspace        WorkspaceState `json:"workspace"`
+	Task             TaskState      `json:"task"`
+	Progress         ProgressState  `json:"progress"`
+	Decisions        []*Decision    `json:"decisions"`
+	Files            FilesState     `json:"files"`
+	Tests            TestsState     `json:"tests"`
+	Blockers         []*Blocker     `json:"blockers"`
+	RecentlyResolved []*Blocker     `json:"recently_resolved,omitempty"`
+	NextAction       string         `json:"next_action"`
+	LastAgent        string         `json:"last_agent"`
+	Nudges           []string       `json:"nudges,omitempty"`
 }
 
 type SessionState struct {

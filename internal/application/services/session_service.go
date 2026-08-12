@@ -54,7 +54,6 @@ func (s *SessionService) Start(ctx context.Context, projectID, title, agent stri
 			return nil, err
 		}
 	}
-
 	project, err := s.store.Projects().GetByID(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -113,12 +112,9 @@ func (s *SessionService) Resume(ctx context.Context, projectID, agent string) (*
 		return nil, err
 	}
 
-	agentSession := &entities.AgentSession{
-		ID:        ids.New("asess"),
-		SessionID: session.ID,
-		Agent:     agent,
-	}
-	if err := s.store.AgentSessions().Create(ctx, agentSession); err != nil {
+	// atomically close any open agent session and create a new one, so exactly
+	// one is active even under concurrent processes
+	if _, err := s.store.AgentSessions().Resume(ctx, session.ID, agent); err != nil {
 		return nil, err
 	}
 
@@ -143,6 +139,11 @@ func (s *SessionService) complete(ctx context.Context, sessionID string) error {
 		return err
 	}
 
+	// close any agent sessions still open so no session leaks an ended_at=NULL
+	if err := s.closeActiveAgentSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
 		ID:        ids.New("evt"),
 		SessionID: session.ID,
@@ -150,6 +151,21 @@ func (s *SessionService) complete(ctx context.Context, sessionID string) error {
 		Type:      entities.EventSessionCompleted,
 	}); err != nil {
 		return err
+	}
+	return nil
+}
+
+// closeActiveAgentSession ends every agent session for a session that is still
+// open (ended_at IS NULL). It is a no-op when none are open.
+func (s *SessionService) closeActiveAgentSession(ctx context.Context, sessionID string) error {
+	open, err := s.store.AgentSessions().ListOpen(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, as := range open {
+		if err := s.store.AgentSessions().Close(ctx, as.ID, entities.Now(), as.CheckpointID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

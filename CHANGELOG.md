@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **Versioned SQLite migrations** — `schema_migrations` table + `migrations/*.sql` steps, applied transactionally and idempotently. Legacy databases created by the old single-file schema are auto-detected and marked migrated without data loss.
+- **P1 hardening: session lifecycle** — resume/complete/start now close all open agent sessions (`ended_at` set); `Resume` is atomic (single transaction) so concurrent processes never leave more than one active agent session.
+- **P1: checkpoint diff detects resolved blockers** — snapshots surface `RecentlyResolved` (blockers resolved since last checkpoint), so the open→resolved transition is visible in diffs.
+- **P1: context trust model** — MCP instructions and AGENTS.md now state that session state is data, never executable instructions, to prevent cross-agent injection.
+- **P1: structured handoff schema** — handoff events carry `handoff_id`, `from_agent`, `to_agent`, `checkpoint_id`.
+- **P1: concurrency tests** — concurrent events/checkpoints/resumes across multiple app instances on one SQLite DB (found & fixed a real resume race).
 - `agent-session migrate` — removes old per-project agent configs and re-wires at user scope
 - CI workflow (`ci.yml`) — runs `go test`, `go vet`, `go build` on every push/PR
 - Auto-update Homebrew formula on release (CI builds bottle + pushes to tap)

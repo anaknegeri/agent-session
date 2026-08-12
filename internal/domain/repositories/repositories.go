@@ -38,6 +38,7 @@ type BlockerRepository interface {
 	Create(ctx context.Context, blocker *entities.Blocker) error
 	ListBySession(ctx context.Context, sessionID string) ([]*entities.Blocker, error)
 	ListOpen(ctx context.Context, sessionID string) ([]*entities.Blocker, error)
+	ListResolved(ctx context.Context, sessionID string, since interface{}) ([]*entities.Blocker, error)
 	Resolve(ctx context.Context, id string, resolvedAt interface{}) error
 }
 
@@ -57,6 +58,11 @@ type AgentSessionRepository interface {
 	Create(ctx context.Context, agentSession *entities.AgentSession) error
 	Close(ctx context.Context, id string, endedAt interface{}, checkpointID string) error
 	GetLatest(ctx context.Context, sessionID string) (*entities.AgentSession, error)
+	ListOpen(ctx context.Context, sessionID string) ([]*entities.AgentSession, error)
+	// Resume atomically closes all open agent sessions for the session and
+	// creates a new one, guaranteeing exactly one active agent session even
+	// under concurrent processes (MCP server + CLI).
+	Resume(ctx context.Context, sessionID, agent string) (*entities.AgentSession, error)
 }
 
 type ArtifactRepository interface {

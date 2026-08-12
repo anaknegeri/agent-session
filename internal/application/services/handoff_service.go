@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
@@ -48,7 +49,9 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 		return "", err
 	}
 
-	if _, err := s.checkpoints.Create(ctx, sessionID, "handoff", "", session.LastAgent); err != nil {
+	from := session.LastAgent
+	cp, err := s.checkpoints.Create(ctx, sessionID, "handoff", "", from)
+	if err != nil {
 		return "", err
 	}
 
@@ -67,20 +70,29 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 		return "", err
 	}
 
+	handoffID := ids.New("handoff")
+	payload, _ := json.Marshal(map[string]string{
+		"handoff_id":    handoffID,
+		"from_agent":    from,
+		"to_agent":      to,
+		"checkpoint_id": cp.ID,
+	})
 	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
 		ID:        ids.New("evt"),
 		SessionID: sessionID,
-		Agent:     snapshot.LastAgent,
+		Agent:     from,
 		Type:      entities.EventHandoffCreated,
-		Payload:   `{"to":"` + to + `"}`,
+		Payload:   string(payload),
 	}); err != nil {
 		return "", err
 	}
 
 	s.logger.Info("handoff created",
+		"handoff_id", handoffID,
 		"session_id", sessionID,
-		"from", snapshot.LastAgent,
+		"from", from,
 		"to", to,
+		"checkpoint_id", cp.ID,
 	)
 	return text, nil
 }

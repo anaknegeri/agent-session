@@ -8,6 +8,7 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	"github.com/anaknegeri/agent-session/internal/domain/repositories"
+	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
 type agentSessionStore struct {
@@ -47,6 +48,47 @@ func (s *agentSessionStore) GetLatest(ctx context.Context, sessionID string) (*e
 		return nil, fmt.Errorf("get latest agent session: %w", err)
 	}
 	return &as, nil
+}
+
+// ListOpen returns agent sessions that have not been ended yet.
+func (s *agentSessionStore) ListOpen(ctx context.Context, sessionID string) ([]*entities.AgentSession, error) {
+	var rows []*entities.AgentSession
+	if err := s.db.WithContext(ctx).
+		Where("session_id = ? AND ended_at IS NULL", sessionID).
+		Order("started_at ASC").
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list open agent sessions: %w", err)
+	}
+	return rows, nil
+}
+
+// Resume closes all open agent sessions and creates a new one inside a single
+// transaction, so concurrent callers never end up with more than one active
+// agent session per session.
+func (s *agentSessionStore) Resume(ctx context.Context, sessionID, agent string) (*entities.AgentSession, error) {
+	var created *entities.AgentSession
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&entities.AgentSession{}).
+			Where("session_id = ? AND ended_at IS NULL", sessionID).
+			Updates(map[string]interface{}{"ended_at": entities.Now()}).Error; err != nil {
+			return fmt.Errorf("close open agent sessions: %w", err)
+		}
+
+		as := &entities.AgentSession{
+			ID:        ids.New("asess"),
+			SessionID: sessionID,
+			Agent:     agent,
+		}
+		if err := tx.Create(as).Error; err != nil {
+			return fmt.Errorf("create agent session: %w", err)
+		}
+		created = as
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
 }
 
 type artifactStore struct {

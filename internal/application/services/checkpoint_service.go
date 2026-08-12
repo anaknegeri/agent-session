@@ -104,6 +104,13 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 	decisions, _ := s.store.Decisions().ListBySession(ctx, sessionID)
 	blockers, _ := s.store.Blockers().ListOpen(ctx, sessionID)
 
+	// surface blockers resolved since the last checkpoint so checkpoint diffs
+	// can detect the open→resolved transition (snapshot stores open state only).
+	var resolved []*entities.Blocker
+	if latest, err := s.store.Checkpoints().GetLatest(ctx, sessionID); err == nil && !latest.CreatedAt.IsZero() {
+		resolved, _ = s.store.Blockers().ListResolved(ctx, sessionID, latest.CreatedAt.Time.UTC())
+	}
+
 	modified := make([]string, 0, len(workspace.Changes))
 	for _, c := range workspace.Changes {
 		modified = append(modified, c.Path)
@@ -130,12 +137,13 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 			Completed: completed,
 			Pending:   pending,
 		},
-		Decisions:  decisions,
-		Files:      entities.FilesState{Modified: modified},
-		Tests:      s.testsState(ctx, sessionID),
-		Blockers:   blockers,
-		NextAction: "",
-		LastAgent:  session.LastAgent,
+		Decisions:        decisions,
+		Files:            entities.FilesState{Modified: modified},
+		Tests:            s.testsState(ctx, sessionID),
+		Blockers:         blockers,
+		RecentlyResolved: resolved,
+		NextAction:       "",
+		LastAgent:        session.LastAgent,
 	}
 
 	// surface the most recent checkpoint's next_action so resumed agents know
@@ -275,14 +283,11 @@ func (s *CheckpointService) Diff(ctx context.Context, beforeID, afterID string) 
 	for _, b := range beforeSnap.Blockers {
 		beforeBlockers[b.ID] = true
 	}
-	afterBlockersResolved := map[string]*entities.Blocker{}
-	for _, b := range afterSnap.Blockers {
-		if b.Status == entities.BlockerStatusResolved {
-			afterBlockersResolved[b.ID] = b
-		}
-	}
-	for _, b := range beforeSnap.Blockers {
-		if beforeBlockers[b.ID] && afterBlockersResolved[b.ID] != nil {
+	// resolved blockers are surfaced in RecentlyResolved (snapshot keeps open
+	// blockers only), so compare against that set instead of expecting them in
+	// Blockers of the after snapshot.
+	for _, b := range afterSnap.RecentlyResolved {
+		if beforeBlockers[b.ID] {
 			diff.ResolvedBlockers = append(diff.ResolvedBlockers, b)
 		}
 	}

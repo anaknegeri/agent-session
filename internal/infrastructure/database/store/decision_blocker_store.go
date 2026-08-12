@@ -58,6 +58,23 @@ func (s *blockerStore) ListOpen(ctx context.Context, sessionID string) ([]*entit
 	return s.list(ctx, sessionID, entities.BlockerStatusOpen)
 }
 
+// ListResolved returns blockers resolved after `since` (a timestamp), ordered by
+// resolved_at ascending. Used by the snapshot to surface recent resolutions so
+// checkpoint diffs can detect them.
+func (s *blockerStore) ListResolved(ctx context.Context, sessionID string, since interface{}) ([]*entities.Blocker, error) {
+	q := s.db.WithContext(ctx).
+		Where("session_id = ?", sessionID).
+		Where("status = ?", entities.BlockerStatusResolved)
+	if since != nil {
+		q = q.Where("resolved_at > ?", since)
+	}
+	var blockers []*entities.Blocker
+	if err := q.Order("resolved_at ASC").Find(&blockers).Error; err != nil {
+		return nil, fmt.Errorf("list resolved blockers: %w", err)
+	}
+	return blockers, nil
+}
+
 func (s *blockerStore) list(ctx context.Context, sessionID, status string) ([]*entities.Blocker, error) {
 	q := s.db.WithContext(ctx).Where("session_id = ?", sessionID)
 	if status != "" {
