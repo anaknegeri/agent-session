@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 )
 
@@ -70,12 +71,15 @@ func (s *blockerStore) list(ctx context.Context, sessionID, status string) ([]*e
 }
 
 func (s *blockerStore) Resolve(ctx context.Context, id string, resolvedAt interface{}) error {
-	if err := s.db.WithContext(ctx).
+	result := s.db.WithContext(ctx).
 		Model(&entities.Blocker{}).
 		Where("id = ?", id).
-		Updates(map[string]interface{}{"status": entities.BlockerStatusResolved, "resolved_at": resolvedAt}).
-		Error; err != nil {
-		return fmt.Errorf("resolve blocker: %w", err)
+		Updates(map[string]interface{}{"status": entities.BlockerStatusResolved, "resolved_at": resolvedAt})
+	if result.Error != nil {
+		return fmt.Errorf("resolve blocker: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return domainerr.ErrBlockerNotFound
 	}
 	return nil
 }

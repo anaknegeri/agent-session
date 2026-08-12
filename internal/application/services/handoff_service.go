@@ -6,13 +6,22 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 )
+
+// supportedHandoffAgents mirrors the adapters documented for `agent-session handoff`.
+var supportedHandoffAgents = map[string]bool{
+	"claude":   true,
+	"codex":    true,
+	"opencode": true,
+}
 
 type HandoffService struct {
 	store       ports.Store
 	checkpoints *CheckpointService
 	renderer    ports.ContextRenderer
+	budget      ports.ContextBudget
 	logger      *slog.Logger
 }
 
@@ -20,15 +29,20 @@ func NewHandoffService(
 	store ports.Store,
 	checkpoints *CheckpointService,
 	renderer ports.ContextRenderer,
+	budget ports.ContextBudget,
 	logger *slog.Logger,
 ) *HandoffService {
-	return &HandoffService{store: store, checkpoints: checkpoints, renderer: renderer, logger: logger}
+	return &HandoffService{store: store, checkpoints: checkpoints, renderer: renderer, budget: budget, logger: logger}
 }
 
 // Handoff composes a deterministic handoff context for the target agent (UC-04).
 // It snapshots the current state first so the next agent gets the latest
 // checkpoint (PRD §23: automatic checkpoint on handoff).
 func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (string, error) {
+	if !supportedHandoffAgents[to] {
+		return "", domainerr.ErrAgentNotSupported
+	}
+
 	session, err := s.store.Sessions().GetByID(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -43,7 +57,7 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 		return "", err
 	}
 
-	text, err := s.renderer.RenderHandoff(snapshot, to)
+	text, err := s.renderer.RenderHandoff(snapshot, to, s.budget)
 	if err != nil {
 		return "", err
 	}

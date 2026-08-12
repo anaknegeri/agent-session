@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cline"
@@ -13,6 +14,50 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cursor"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
 )
+
+// installClaudeGlobal registers agent-session in Claude Code at user scope,
+// merges the guarded SessionStart/Stop/PreCompact hooks into
+// ~/.claude/settings.json, and adds the Agent Session rule to ~/.claude/CLAUDE.md
+// (AGENTS.md alone is never read by Claude Code) so state loads and
+// checkpoints automatically in every agent-session project on this machine.
+func installClaudeGlobal(bin string) error {
+	cmd := exec.Command("claude", "mcp", "add", "--scope", "user", "agent-session", "--", bin, "mcp")
+	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "already exists") {
+		return fmt.Errorf("claude mcp add (user scope): %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	if err := claude.EnsureGlobalHooks(home); err != nil {
+		return fmt.Errorf("claude hooks: %w", err)
+	}
+	if _, err := claude.EnsureGlobalRule(home); err != nil {
+		return fmt.Errorf("claude rule: %w", err)
+	}
+	return nil
+}
+
+// uninstallClaudeGlobal reverses installClaudeGlobal: deregisters the
+// user-scope MCP server and strips the hooks/rule it added, leaving any
+// other ~/.claude settings untouched.
+func uninstallClaudeGlobal() error {
+	cmd := exec.Command("claude", "mcp", "remove", "--scope", "user", "agent-session")
+	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(strings.ToLower(string(out)), "no mcp server named") {
+		return fmt.Errorf("claude mcp remove (user scope): %v: %s", err, strings.TrimSpace(string(out)))
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	if err := claude.RemoveGlobalHooks(home); err != nil {
+		return fmt.Errorf("claude hooks: %w", err)
+	}
+	if err := claude.RemoveGlobalRule(home); err != nil {
+		return fmt.Errorf("claude rule: %w", err)
+	}
+	return nil
+}
 
 // installClaude wires Claude Code via project .mcp.json + CLAUDE.md + hooks.
 func installClaude(dir, bin string) {
@@ -104,6 +149,44 @@ func installOpenCodeGlobal(bin string) error {
 		},
 	}
 	config["mcp"] = mcpServers
+	opencode.MergeGlobalInstructions(config)
+
+	out, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal opencode.json: %w", err)
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+// uninstallOpenCodeGlobal reverses installOpenCodeGlobal: removes the
+// agent-session MCP entry and its always-on instructions from
+// ~/.config/opencode/opencode.json, leaving any other config untouched.
+func uninstallOpenCodeGlobal() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	path := filepath.Join(home, ".config", "opencode", "opencode.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	if mcpServers, ok := config["mcp"].(map[string]any); ok {
+		delete(mcpServers, "agent-session")
+		if len(mcpServers) == 0 {
+			delete(config, "mcp")
+		} else {
+			config["mcp"] = mcpServers
+		}
+	}
+	opencode.RemoveGlobalInstructions(config)
 
 	out, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -142,6 +225,44 @@ func installCursorGlobal(bin string) error {
 		},
 	}
 	config["mcpServers"] = mcpServers
+
+	out, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal cursor mcp.json: %w", err)
+	}
+	return os.WriteFile(path, out, 0o644)
+}
+
+// uninstallCursorGlobal reverses installCursorGlobal: removes the
+// agent-session entry from ~/.cursor/mcp.json, leaving any other MCP server
+// registration untouched.
+func uninstallCursorGlobal() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	path := filepath.Join(home, ".cursor", "mcp.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("parse %s: %w", path, err)
+	}
+	mcpServers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	delete(mcpServers, "agent-session")
+	if len(mcpServers) == 0 {
+		delete(config, "mcpServers")
+	} else {
+		config["mcpServers"] = mcpServers
+	}
 
 	out, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {

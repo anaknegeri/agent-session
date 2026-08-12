@@ -3,8 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -98,12 +96,11 @@ func newInitCmd() *cobra.Command {
 func installAgentGlobal(bin, name string) {
 	switch name {
 	case "claude":
-		cmd := exec.Command("claude", "mcp", "add", "--scope", "user", "agent-session", "--", bin, "mcp")
-		if out, err := cmd.CombinedOutput(); err != nil {
-			red("✗ claude (user scope): %v: %s\n", err, strings.TrimSpace(string(out)))
+		if err := installClaudeGlobal(bin); err != nil {
+			red("✗ claude (user scope): %v\n", err)
 			return
 		}
-		green("✓ claude: registered at user scope (always available)\n")
+		green("✓ claude: registered at user scope + hooks + CLAUDE.md rule (always compliant)\n")
 	case "opencode":
 		if err := installOpenCodeGlobal(bin); err != nil {
 			red("✗ opencode: %v\n", err)

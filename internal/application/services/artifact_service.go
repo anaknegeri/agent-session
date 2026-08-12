@@ -6,6 +6,7 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
@@ -42,6 +43,9 @@ func (s *ArtifactService) Store(ctx context.Context, sessionID, kind, path, cont
 // AppendEvent records a canonical event. Payloads larger than
 // LargePayloadThreshold are stored as artifacts and referenced by ID.
 func (s *ArtifactService) AppendEvent(ctx context.Context, sessionID, agent, eventType, payload string) error {
+	if !entities.IsCanonicalEventType(eventType) {
+		return domainerr.ErrInvalidEventType
+	}
 	ref := payload
 	if len(payload) > LargePayloadThreshold {
 		artifactID, err := s.Store(ctx, sessionID, artifactKind(eventType), "", payload)

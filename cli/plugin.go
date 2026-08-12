@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -68,31 +67,33 @@ func newPluginInstallCmd() *cobra.Command {
 			return configureAgent(args[0], true, scope)
 		},
 	}
-	cmd.Flags().StringVar(&scope, "scope", "project", "claude scope: project (.mcp.json) | user (~/.claude.json, always available)")
+	cmd.Flags().StringVar(&scope, "scope", "project", "claude/opencode/cursor scope: project | user (always available, matches `init`)")
 	return cmd
 }
 
 func newPluginUninstallCmd() *cobra.Command {
-	return &cobra.Command{
+	var scope string
+	cmd := &cobra.Command{
 		Use:   "uninstall <agent>",
-		Short: "Uninstall the MCP server for an agent",
+		Short: "Uninstall the MCP server for an agent (use --scope user to undo what `init` wired at user scope)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return configureAgent(args[0], false, "")
+			return configureAgent(args[0], false, scope)
 		},
 	}
+	cmd.Flags().StringVar(&scope, "scope", "project", "claude/opencode/cursor scope: project | user")
+	return cmd
 }
 
 func configureAgent(name string, install bool, scope string) error {
 	bin := selfPath()
 	switch name {
 	case "claude":
-		if install && scope == "user" {
-			cmd := exec.Command("claude", "mcp", "add", "--scope", "user", "agent-session", "--", bin, "mcp")
-			if out, err := cmd.CombinedOutput(); err != nil {
-				return fmt.Errorf("claude mcp add (user scope): %v: %s", err, out)
+		if scope == "user" {
+			if install {
+				return installClaudeGlobal(bin)
 			}
-			return nil
+			return uninstallClaudeGlobal()
 		}
 		a := claude.NewAdapter(cwd())
 		if install {
@@ -112,6 +113,12 @@ func configureAgent(name string, install bool, scope string) error {
 		}
 		return a.Uninstall(ctx())
 	case "opencode":
+		if scope == "user" {
+			if install {
+				return installOpenCodeGlobal(bin)
+			}
+			return uninstallOpenCodeGlobal()
+		}
 		a := opencode.NewAdapter(cwd())
 		if install {
 			if err := a.Configure(ctx(), bin); err != nil {
@@ -121,6 +128,12 @@ func configureAgent(name string, install bool, scope string) error {
 		}
 		return a.Uninstall(ctx())
 	case "cursor":
+		if scope == "user" {
+			if install {
+				return installCursorGlobal(bin)
+			}
+			return uninstallCursorGlobal()
+		}
 		a := cursor.NewAdapter(cwd())
 		if install {
 			if err := a.Configure(ctx(), bin); err != nil {

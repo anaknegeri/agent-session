@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"log/slog"
+	"strings"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
@@ -23,6 +24,9 @@ func NewTaskService(store ports.Store, logger *slog.Logger) *TaskService {
 func (s *TaskService) Create(ctx context.Context, sessionID, title, agent string) (*entities.Task, error) {
 	if sessionID == "" {
 		return nil, domainerr.ErrSessionNotFound
+	}
+	if strings.TrimSpace(title) == "" {
+		return nil, domainerr.ErrTaskTitleRequired
 	}
 	task := &entities.Task{
 		ID:        ids.New("task"),

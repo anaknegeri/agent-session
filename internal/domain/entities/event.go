@@ -16,6 +16,27 @@ const (
 	EventSessionCompleted  = "session.completed"
 )
 
+var canonicalEventTypes = map[string]bool{
+	EventSessionStarted:    true,
+	EventTaskCreated:       true,
+	EventTaskUpdated:       true,
+	EventFileChanged:       true,
+	EventCommandExecuted:   true,
+	EventTestStarted:       true,
+	EventTestFailed:        true,
+	EventTestPassed:        true,
+	EventDecisionCreated:   true,
+	EventBlockerCreated:    true,
+	EventCheckpointCreated: true,
+	EventHandoffCreated:    true,
+	EventSessionCompleted:  true,
+}
+
+// IsCanonicalEventType reports whether t is one of the documented event types (PRD §14.3).
+func IsCanonicalEventType(t string) bool {
+	return canonicalEventTypes[t]
+}
+
 type SessionEvent struct {
 	ID        string    `json:"id" db:"id"`
 	SessionID string    `json:"session_id" db:"session_id"`

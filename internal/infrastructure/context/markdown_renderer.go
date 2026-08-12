@@ -139,8 +139,10 @@ func truncate(s string, max int) string {
 	return string(runes[:max]) + "…"
 }
 
-// RenderHandoff produces the deterministic handoff context (PRD §24).
-func (r *renderer) RenderHandoff(snapshot *entities.Snapshot, to string) (string, error) {
+// RenderHandoff produces the deterministic handoff context (PRD §24), bounded
+// by the same context budget as context.get so a single oversized decision or
+// blocker can't blow up the token cost of a handoff.
+func (r *renderer) RenderHandoff(snapshot *entities.Snapshot, to string, budget ports.ContextBudget) (string, error) {
 	var b strings.Builder
 
 	b.WriteString("You are continuing an existing coding session.\n\n")
@@ -155,31 +157,43 @@ func (r *renderer) RenderHandoff(snapshot *entities.Snapshot, to string) (string
 	if len(snapshot.Progress.Completed) > 0 {
 		b.WriteString("Completed:\n")
 		for _, item := range snapshot.Progress.Completed {
-			fmt.Fprintf(&b, "- %s\n", item)
+			fmt.Fprintf(&b, "- %s\n", truncate(item, budget.MaxItemChars))
 		}
 		b.WriteString("\n")
 	}
 
 	if len(snapshot.Decisions) > 0 {
 		b.WriteString("Decisions:\n")
-		for _, d := range snapshot.Decisions {
-			fmt.Fprintf(&b, "- %s\n", d.Decision)
+		limit := limit(len(snapshot.Decisions), budget.MaxDecisions)
+		for _, d := range snapshot.Decisions[:limit] {
+			fmt.Fprintf(&b, "- %s\n", truncate(d.Decision, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Decisions) {
+			fmt.Fprintf(&b, "- … +%d more decisions\n", len(snapshot.Decisions)-limit)
 		}
 		b.WriteString("\n")
 	}
 
 	if len(snapshot.Blockers) > 0 {
 		b.WriteString("Current blocker:\n")
-		for _, bl := range snapshot.Blockers {
-			fmt.Fprintf(&b, "- %s\n", bl.Description)
+		limit := limit(len(snapshot.Blockers), budget.MaxBlockers)
+		for _, bl := range snapshot.Blockers[:limit] {
+			fmt.Fprintf(&b, "- %s\n", truncate(bl.Description, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Blockers) {
+			fmt.Fprintf(&b, "- … +%d more blockers\n", len(snapshot.Blockers)-limit)
 		}
 		b.WriteString("\n")
 	}
 
 	if len(snapshot.Files.Modified) > 0 {
 		b.WriteString("Changed files:\n")
-		for _, f := range snapshot.Files.Modified {
-			fmt.Fprintf(&b, "- %s\n", f)
+		limit := limit(len(snapshot.Files.Modified), budget.MaxFiles)
+		for _, f := range snapshot.Files.Modified[:limit] {
+			fmt.Fprintf(&b, "- %s\n", truncate(f, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Files.Modified) {
+			fmt.Fprintf(&b, "- … +%d more files\n", len(snapshot.Files.Modified)-limit)
 		}
 		b.WriteString("\n")
 	}

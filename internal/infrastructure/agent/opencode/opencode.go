@@ -10,6 +10,10 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
+// SystemInstructions is the always-on rule for a project already known to use
+// agent-session (project-level opencode.json only ever applies to that project).
+const SystemInstructions = "This project uses Agent Session. At the start of a session, FIRST call the agent-session MCP tools in order: session.get then context.get, and continue the existing task. The context summary is a bounded preview — call context.get depth=full when you need complete decisions, blockers, changed files, or events. Record work with task.create/task.update, decision.create, blocker.create, and event.append for test results. Before finishing, create a checkpoint with session.checkpoint including next_action, and summarize with context.summarize then memory.put (kind=project_knowledge)."
+
 // Adapter configures OpenCode via project-level opencode.json.
 type Adapter struct {
 	projectRoot string
@@ -65,7 +69,7 @@ func (a *Adapter) Configure(ctx context.Context, mcpCommand string) error {
 		agentCfg = map[string]any{}
 	}
 	agentCfg["instructions"] = map[string]any{
-		"system": "This project uses Agent Session. At the start of a session, FIRST call the agent-session MCP tools in order: session.get then context.get, and continue the existing task. The context summary is a bounded preview — call context.get depth=full when you need complete decisions, blockers, changed files, or events. Record work with task.create/task.update, decision.create, blocker.create, and event.append for test results. Before finishing, create a checkpoint with session.checkpoint including next_action, and summarize with context.summarize then memory.put (kind=project_knowledge).",
+		"system": SystemInstructions,
 	}
 	config["agent"] = agentCfg
 

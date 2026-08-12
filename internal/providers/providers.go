@@ -49,8 +49,8 @@ func ProvideGitService() ports.GitService {
 	return gitrunner.NewRunner()
 }
 
-func ProvideHandoffService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, logger *slog.Logger) *app.HandoffService {
-	return app.NewHandoffService(store, checkpoints, renderer, logger)
+func ProvideHandoffService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget, logger *slog.Logger) *app.HandoffService {
+	return app.NewHandoffService(store, checkpoints, renderer, budget, logger)
 }
 
 func ProvideArtifactService(store ports.Store) *app.ArtifactService {

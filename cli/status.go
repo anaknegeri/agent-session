@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -27,7 +28,7 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			fmt.Printf("Project       %s\n", snapshot.Workspace.Repository)
-			fmt.Printf("Session       %s\n", snapshot.Session.Title)
+			fmt.Printf("Session       %s\n", singleLine(snapshot.Session.Title))
 			fmt.Printf("Status        %s\n", title(snapshot.Session.Status))
 			fmt.Printf("Last Agent    %s\n", snapshot.LastAgent)
 			fmt.Printf("Branch        %s\n", snapshot.Workspace.Branch)
@@ -71,6 +72,12 @@ func currentSession(app *bootstrap.App) (*entities.Session, error) {
 		return nil, err
 	}
 	return app.Session.GetActive(ctx(), projectID)
+}
+
+// singleLine collapses embedded newlines so free-text fields can't break the
+// fixed-width key-value layout of `status`.
+func singleLine(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func title(s string) string {
