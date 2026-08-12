@@ -26,59 +26,113 @@ func (r *runner) Detect(ctx context.Context, dir string) (bool, error) {
 }
 
 func (r *runner) Status(ctx context.Context, dir string) (ports.WorkspaceStatus, error) {
-	branch, err := r.run(ctx, dir, "branch", "--show-current")
+	snap, err := r.snapshot(ctx, dir)
 	if err != nil {
-		return ports.WorkspaceStatus{}, domainerr.ErrNotGitRepo
+		return ports.WorkspaceStatus{}, err
 	}
 
-	commit, _ := r.run(ctx, dir, "rev-parse", "--short", "HEAD")
-	topLevel, _ := r.run(ctx, dir, "rev-parse", "--show-toplevel")
+	var commit string
+	if snap.hasHead {
+		out, _ := r.run(ctx, dir, "rev-parse", "--short", "HEAD")
+		commit = strings.TrimSpace(out)
+	}
 
-	changes, _ := r.DiffStat(ctx, dir)
+	var repository string
+	if out, err := r.run(ctx, dir, "rev-parse", "--show-toplevel"); err == nil {
+		if top := strings.TrimSpace(out); top != "" {
+			repository = filepath.Base(top)
+		}
+	}
 
 	return ports.WorkspaceStatus{
-		Repository: filepath.Base(strings.TrimSpace(topLevel)),
-		Branch:     strings.TrimSpace(branch),
-		Commit:     strings.TrimSpace(commit),
-		Dirty:      len(changes) > 0,
-		Changes:    changes,
+		Repository: repository,
+		Branch:     snap.branch,
+		Commit:     commit,
+		Dirty:      len(snap.changes) > 0,
+		Changes:    snap.changes,
 	}, nil
 }
 
 func (r *runner) DiffStat(ctx context.Context, dir string) ([]ports.FileChange, error) {
-	if !r.hasHead(ctx, dir) {
-		return nil, nil
-	}
-	out, err := r.run(ctx, dir, "diff", "HEAD", "--name-status")
+	snap, err := r.snapshot(ctx, dir)
 	if err != nil {
-		return nil, fmt.Errorf("git diff HEAD --name-status: %w", err)
+		return nil, err
 	}
+	return snap.changes, nil
+}
 
-	var changes []ports.FileChange
+// gitSnapshot is what a single `git status --porcelain=v2 --branch` yields.
+type gitSnapshot struct {
+	branch  string
+	hasHead bool
+	changes []ports.FileChange
+}
+
+// snapshot collects branch, HEAD presence and the whole change set in one git
+// invocation. Status used to spawn six processes for this — branch, two
+// rev-parse, plus DiffStat's own rev-parse, diff and status — and porcelain v2
+// reports all of it at once, including untracked files.
+func (r *runner) snapshot(ctx context.Context, dir string) (gitSnapshot, error) {
+	out, err := r.run(ctx, dir, "status", "--porcelain=v2", "--branch")
+	if err != nil {
+		return gitSnapshot{}, domainerr.ErrNotGitRepo
+	}
+	return parsePorcelainV2(out), nil
+}
+
+// parsePorcelainV2 reads git's v2 status format. Paths may contain spaces, so
+// every entry is split with a field limit and the path is whatever remains.
+// Paths containing newlines or quotes arrive C-quoted; that matches the previous
+// implementation's behaviour and is left as-is.
+func parsePorcelainV2(out string) gitSnapshot {
+	var snap gitSnapshot
 	for _, line := range strings.Split(out, "\n") {
-		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, "\r")
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 2)
-		if len(parts) < 2 {
-			continue
+		switch {
+		case strings.HasPrefix(line, "# branch.head "):
+			// "(detached)" is a placeholder, not a branch name
+			if head := strings.TrimPrefix(line, "# branch.head "); head != "(detached)" {
+				snap.branch = head
+			}
+		case strings.HasPrefix(line, "# branch.oid "):
+			snap.hasHead = strings.TrimPrefix(line, "# branch.oid ") != "(initial)"
+		case strings.HasPrefix(line, "1 "):
+			// 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path>
+			if f := strings.SplitN(line, " ", 9); len(f) == 9 {
+				snap.changes = append(snap.changes, ports.FileChange{Path: f[8], Status: changeStatus(f[1])})
+			}
+		case strings.HasPrefix(line, "2 "):
+			// 2 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <score> <path>\t<origPath>
+			if f := strings.SplitN(line, " ", 10); len(f) == 10 {
+				path, _, _ := strings.Cut(f[9], "\t")
+				snap.changes = append(snap.changes, ports.FileChange{Path: path, Status: "R"})
+			}
+		case strings.HasPrefix(line, "u "):
+			// u <XY> <sub> <m1> <m2> <m3> <mW> <h1> <h2> <h3> <path>
+			if f := strings.SplitN(line, " ", 11); len(f) == 11 {
+				snap.changes = append(snap.changes, ports.FileChange{Path: f[10], Status: "U"})
+			}
+		case strings.HasPrefix(line, "? "):
+			snap.changes = append(snap.changes, ports.FileChange{Path: strings.TrimPrefix(line, "? "), Status: "??"})
 		}
-		changes = append(changes, ports.FileChange{Path: parts[1], Status: parts[0]})
 	}
+	return snap
+}
 
-	// `git diff HEAD` does not list untracked files; append them from
-	// `git status --porcelain` so a fresh file is not reported as clean.
-	untracked, _ := r.run(ctx, dir, "status", "--porcelain")
-	for _, line := range strings.Split(untracked, "\n") {
-		line = strings.TrimSpace(line)
-		if len(line) < 4 || line[:2] != "??" {
-			continue
-		}
-		changes = append(changes, ports.FileChange{Path: strings.TrimSpace(line[2:]), Status: "??"})
+// changeStatus reduces porcelain v2's two-character <XY> code to the single
+// letter ports.FileChange.Status documents. X is the change staged against HEAD
+// and Y the change in the working tree; the staged one wins when both are set.
+func changeStatus(xy string) string {
+	if len(xy) != 2 {
+		return xy
 	}
-
-	return changes, nil
+	if xy[0] != '.' {
+		return string(xy[0])
+	}
+	return string(xy[1])
 }
 
 func (r *runner) Diff(ctx context.Context, dir string) (string, error) {

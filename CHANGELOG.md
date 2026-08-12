@@ -43,7 +43,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   items, so they cannot open a heading, quote, or fence. Covered by regression
   tests over `context.get` at every depth and over `handoff`.
 
+### Changed
+- **P2: one git subprocess instead of six per workspace status** — `Status` spawned
+  `branch --show-current`, two `rev-parse`, and then `DiffStat`'s own `rev-parse`,
+  `diff HEAD --name-status` and `status --porcelain`. A single
+  `git status --porcelain=v2 --branch` carries branch, HEAD presence and the whole
+  change set including untracked files, so `Status` is down to three processes (two
+  when HEAD is unborn) and `DiffStat` to one. Measured 28.1ms → 14.0ms per call on
+  a small repository; `BenchmarkStatus` keeps it honest.
+- **Unborn HEAD no longer hides untracked files.** `DiffStat` returned early when
+  there was no HEAD, so in a repository whose first commit does not exist yet every
+  file read as clean — the same "untracked files reported as `dirty:false`" bug
+  already fixed for repositories with a HEAD, left behind in this one case. It made
+  auto-record and auto-checkpoint treat the very first session as having nothing to
+  save. `Diff` still returns empty there, since there is no HEAD to diff against.
+
 ### Fixed
+- **Renamed files produced a path that did not exist** — `git diff HEAD --name-status`
+  prints `R100\told\tnew`, and splitting on the first tab left `old\tnew` as the
+  path and `R100` as the status. That bogus path flowed into `files.modified` in
+  every snapshot and into the auto-recorded `file.changed` events. Renames now
+  report the destination path with status `R`.
 - **Concurrent migrations failed on a never-migrated or newly-upgraded database** — the applied-version read sat outside the transaction that applied the steps, so an MCP server and a CLI hook booting together could both decide a version was pending and race to apply it (`table projects already exists`); opening a fresh database could also fail outright with `SQLITE_BUSY` while SQLite took the exclusive lock to switch into WAL mode. Reading and applying now share one `BEGIN IMMEDIATE` transaction, `busy_timeout` is set before the journal-mode change, and `Open` retries the transient lock.
 - **Checkpoint snapshots accumulated every blocker ever resolved** — the "resolved since last checkpoint" query compared a `time.Time` against RFC3339Nano text, so the cutoff never matched and the filter was a no-op. Every snapshot carried the session's whole resolution history, growing without bound. The mechanism is gone: `checkpoint.diff` now derives resolutions from the snapshots it already has.
 - **`checkpoint.diff` under-reported resolved blockers between non-adjacent checkpoints** — the resolution window was anchored to the checkpoint immediately before `after`, so a blocker resolved earlier in the range was missed.
