@@ -192,6 +192,12 @@ The MCP server resolves the project root from the working directory, so the
 same user-scope registration works in every project, with no per-project
 config pollution.
 
+`init` also installs **slash commands** at user scope (Claude Code
+`~/.claude/commands/`, OpenCode `~/.config/opencode/commands/`, Cursor
+`~/.cursor/commands/`) so you can run `/agent-session`, `/agent-session-checkpoint`,
+and `/agent-session-record` in any project. `plugin uninstall <agent> --scope user`
+removes them.
+
 Prefer per-project wiring? Use `agent-session init --project`, or `--only <agent>`
 to wire a single agent into this project only. `--no-agents` keeps the session
 layer only.

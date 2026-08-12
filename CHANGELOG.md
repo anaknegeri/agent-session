@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Slash commands** — `/agent-session`, `/agent-session-checkpoint`, `/agent-session-record` installed at user scope for Claude Code, OpenCode, and Cursor (`plugin uninstall <agent> --scope user` removes them)
 - **Versioned SQLite migrations** — `schema_migrations` table + `migrations/*.sql` steps, applied transactionally and idempotently. Legacy databases created by the old single-file schema are auto-detected and marked migrated without data loss.
 - **P1 hardening: session lifecycle** — resume/complete/start now close all open agent sessions (`ended_at` set); `Resume` is atomic (single transaction) so concurrent processes never leave more than one active agent session.
 - **P1: checkpoint diff detects resolved blockers** — snapshots surface `RecentlyResolved` (blockers resolved since last checkpoint), so the open→resolved transition is visible in diffs.

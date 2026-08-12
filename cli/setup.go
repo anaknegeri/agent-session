@@ -11,9 +11,50 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cline"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/commands"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cursor"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
 )
+
+// commandsDirFor returns the user-scope slash-command directory for an agent,
+// or "" when the agent has no slash-command directory.
+func commandsDirFor(agentName string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home dir: %w", err)
+	}
+	switch agentName {
+	case "claude":
+		return filepath.Join(home, ".claude", "commands"), nil
+	case "opencode":
+		return filepath.Join(home, ".config", "opencode", "commands"), nil
+	case "cursor":
+		return filepath.Join(home, ".cursor", "commands"), nil
+	default:
+		return "", nil
+	}
+}
+
+// installCommands installs slash commands for an agent (user scope). No-op for
+// agents without a commands dir.
+func installCommands(agentName string) error {
+	dir, err := commandsDirFor(agentName)
+	if err != nil || dir == "" {
+		return err
+	}
+	_, err = commands.Install(dir)
+	return err
+}
+
+// uninstallCommands removes slash commands for an agent (user scope).
+func uninstallCommands(agentName string) error {
+	dir, err := commandsDirFor(agentName)
+	if err != nil || dir == "" {
+		return err
+	}
+	_, err = commands.Uninstall(dir)
+	return err
+}
 
 // installClaudeGlobal registers agent-session in Claude Code at user scope,
 // merges the guarded SessionStart/Stop/PreCompact hooks into
@@ -35,12 +76,15 @@ func installClaudeGlobal(bin string) error {
 	if _, err := claude.EnsureGlobalRule(home); err != nil {
 		return fmt.Errorf("claude rule: %w", err)
 	}
+	if err := installCommands("claude"); err != nil {
+		return fmt.Errorf("claude commands: %w", err)
+	}
 	return nil
 }
 
 // uninstallClaudeGlobal reverses installClaudeGlobal: deregisters the
-// user-scope MCP server and strips the hooks/rule it added, leaving any
-// other ~/.claude settings untouched.
+// user-scope MCP server and strips the hooks/rule/commands it added, leaving
+// any other ~/.claude settings untouched.
 func uninstallClaudeGlobal() error {
 	cmd := exec.Command("claude", "mcp", "remove", "--scope", "user", "agent-session")
 	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(strings.ToLower(string(out)), "no mcp server named") {
@@ -55,6 +99,9 @@ func uninstallClaudeGlobal() error {
 	}
 	if err := claude.RemoveGlobalRule(home); err != nil {
 		return fmt.Errorf("claude rule: %w", err)
+	}
+	if err := uninstallCommands("claude"); err != nil {
+		return fmt.Errorf("claude commands: %w", err)
 	}
 	return nil
 }
@@ -155,7 +202,10 @@ func installOpenCodeGlobal(bin string) error {
 	if err != nil {
 		return fmt.Errorf("marshal opencode.json: %w", err)
 	}
-	return os.WriteFile(path, out, 0o644)
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+	return installCommands("opencode")
 }
 
 // uninstallOpenCodeGlobal reverses installOpenCodeGlobal: removes the
@@ -192,7 +242,10 @@ func uninstallOpenCodeGlobal() error {
 	if err != nil {
 		return fmt.Errorf("marshal opencode.json: %w", err)
 	}
-	return os.WriteFile(path, out, 0o644)
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+	return uninstallCommands("opencode")
 }
 
 // installCursorGlobal registers agent-session in the user-level ~/.cursor/mcp.json.
@@ -230,7 +283,10 @@ func installCursorGlobal(bin string) error {
 	if err != nil {
 		return fmt.Errorf("marshal cursor mcp.json: %w", err)
 	}
-	return os.WriteFile(path, out, 0o644)
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+	return installCommands("cursor")
 }
 
 // uninstallCursorGlobal reverses installCursorGlobal: removes the
@@ -268,5 +324,8 @@ func uninstallCursorGlobal() error {
 	if err != nil {
 		return fmt.Errorf("marshal cursor mcp.json: %w", err)
 	}
-	return os.WriteFile(path, out, 0o644)
+	if err := os.WriteFile(path, out, 0o644); err != nil {
+		return err
+	}
+	return uninstallCommands("cursor")
 }
