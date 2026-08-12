@@ -41,7 +41,7 @@ Use --check to only report whether an update is available.`,
 			if err != nil {
 				return fmt.Errorf("update failed: %w", err)
 			}
-			fmt.Printf("Updated to %s. Restart any running MCP servers to pick up the change.\n", newVersion)
+			fmt.Printf("Updated to %s (agent-session + agent-session-mcp). Restart any running MCP servers to pick up the change.\n", newVersion)
 			return nil
 		},
 	}

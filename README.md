@@ -6,6 +6,10 @@
   <img src="docs/banner.png" alt="Agent Session — One session. Any coding agent." width="80%">
 </p>
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Agent Session demo — init, start, status, checkpoint, handoff, resume" width="90%">
+</p>
+
 Universal session & handoff layer for AI coding agents.
 Switch between **Claude Code, Codex, OpenCode** — and any future agent — without losing context.
 
@@ -320,30 +324,30 @@ your model's exact tokenizer may differ.
 start / post-compaction / handoff (read README, AGENTS.md, `git log`, `git status`,
 `git diff`, glob source files). "With" = a single `context.get` call.
 
-#### Results (live run on this repo)
+#### Results (live run on this repo, 2026-08-12)
 
 | Scenario | Without agent-session | With agent-session | Savings |
 |---|---|---|---|
-| Cold start (first turn) | ~4,311 tokens | ~320 tokens | **93%** |
-| Post-compaction re-orientation | ~4,311 tokens | ~320 tokens | **93%** |
-| Agent handoff (Claude → Codex) | ~4,311 tokens (state lost) | ~472 tokens (state preserved) | **90%** |
+| Cold start (first turn) | ~10,146 tokens | ~773 tokens | **93%** |
+| Post-compaction re-orientation | ~10,146 tokens | ~773 tokens | **93%** |
+| Agent handoff (Claude → Codex) | ~10,146 tokens (state lost) | ~1,195 tokens (state preserved) | **89%** |
 
 #### Cumulative savings over multiple re-orientations
 
 | Re-orientations | Without | With | Saved |
 |---|---|---|---|
-| 1 | 4,311 tok | 320 tok | 3,991 tok |
-| 5 | 21,555 tok | 1,600 tok | 19,955 tok |
-| 10 | 43,110 tok | 3,200 tok | **39,910 tok** |
-| 20 | 86,220 tok | 6,400 tok | 79,820 tok |
+| 1 | 10,146 tok | 773 tok | 9,373 tok |
+| 5 | 50,730 tok | 3,865 tok | 46,865 tok |
+| 10 | 101,460 tok | 7,730 tok | **93,730 tok** |
+| 20 | 202,920 tok | 15,460 tok | 187,460 tok |
 
 #### Context depth comparison
 
 | Depth | Chars | ≈ Tokens |
 |---|---|---|
-| `summary` (default, clamped at 4000 chars) | 1,282 | 320 |
-| `recent` (bounded lists, no hard clamp) | 1,368 | 342 |
-| `full` (never truncated) | 1,872 | 468 |
+| `summary` (default, clamped at 4000 chars) | 3,094 | 773 |
+| `recent` (bounded lists, no hard clamp) | 2,983 | 745 |
+| `full` (never truncated) | 5,894 | 1,473 |
 
 > "Without agent-session" is a **minimum** — in practice agents also search code,
 > read specific files, and re-derive decisions that agent-session preserves

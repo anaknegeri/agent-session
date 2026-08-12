@@ -84,10 +84,19 @@ func Check(ctx context.Context, repo string) (*Info, error) {
 	}, nil
 }
 
-// Download fetches the platform asset for version into path and verifies its
-// SHA256 against the release checksum file.
+// Download fetches the platform binary asset for version into path and verifies
+// its SHA256 against the release checksum file.
 func Download(ctx context.Context, repo, versionTag, path string) error {
-	asset := assetName()
+	return downloadAsset(ctx, repo, versionTag, assetName(), path)
+}
+
+// DownloadMCP fetches the agent-session-mcp platform asset for version into
+// path and verifies its SHA256 against the release checksum file.
+func DownloadMCP(ctx context.Context, repo, versionTag, path string) error {
+	return downloadAsset(ctx, repo, versionTag, mcpAssetName(), path)
+}
+
+func downloadAsset(ctx context.Context, repo, versionTag, asset, path string) error {
 	url := fmt.Sprintf(assetBaseFmt, repo, versionTag, asset)
 	sum, err := fetchChecksum(ctx, repo, versionTag, asset)
 	if err != nil {
@@ -104,8 +113,9 @@ func Download(ctx context.Context, repo, versionTag, path string) error {
 	return os.Chmod(path, 0o755)
 }
 
-// SelfUpdate downloads the latest release and replaces the running binary.
-// Returns the new version installed.
+// SelfUpdate downloads the latest release and replaces the running binary and
+// any agent-session-mcp binary sitting next to it. Returns the new version
+// installed.
 func SelfUpdate(ctx context.Context, repo string, force bool) (string, error) {
 	info, err := Check(ctx, repo)
 	if err != nil {
@@ -140,7 +150,51 @@ func SelfUpdate(ctx context.Context, repo string, force bool) (string, error) {
 		return "", fmt.Errorf("replace binary: %w", err)
 	}
 	os.Remove(backup)
+
+	if err := updateMCP(ctx, repo, info.Latest, dir); err != nil {
+		return "", err
+	}
 	return info.Latest, nil
+}
+
+// updateMCP replaces the agent-session-mcp binary in dir when it exists,
+// keeping it in sync with the main binary. Missing MCP binaries (e.g. a
+// user-scope install that only ever runs `mcp` via the main binary) are
+// skipped, not an error.
+func updateMCP(ctx context.Context, repo, version, dir string) error {
+	target := filepath.Join(dir, mcpBinaryName())
+	if _, err := os.Stat(target); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat agent-session-mcp: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "agent-session-mcp-*.new")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+
+	if err := DownloadMCP(ctx, repo, "v"+version, tmpPath); err != nil {
+		return fmt.Errorf("download agent-session-mcp: %w", err)
+	}
+
+	backup := target + ".old"
+	os.Remove(backup)
+	if err := os.Rename(target, backup); err != nil {
+		return fmt.Errorf("backup agent-session-mcp: %w", err)
+	}
+	if err := os.Rename(tmpPath, target); err != nil {
+		os.Rename(backup, target) // rollback
+		return fmt.Errorf("replace agent-session-mcp: %w", err)
+	}
+	os.Remove(backup)
+	return nil
 }
 
 // assetName returns the release asset name for the current platform.
@@ -150,6 +204,26 @@ func assetName() string {
 		return fmt.Sprintf("agent-session-windows-%s.exe", runtime.GOARCH)
 	}
 	return fmt.Sprintf("agent-session-%s-%s", osName, runtime.GOARCH)
+}
+
+// mcpAssetName returns the release asset name of the MCP server binary for the
+// current platform. Release builds ship agent-session-mcp alongside the main
+// binary (see scripts/cross-compile.sh).
+func mcpAssetName() string {
+	osName := runtime.GOOS
+	if osName == "windows" {
+		return fmt.Sprintf("agent-session-mcp-windows-%s.exe", runtime.GOARCH)
+	}
+	return fmt.Sprintf("agent-session-mcp-%s-%s", osName, runtime.GOARCH)
+}
+
+// mcpBinaryName is the file name of the MCP server binary next to the main
+// executable on the current platform.
+func mcpBinaryName() string {
+	if runtime.GOOS == "windows" {
+		return "agent-session-mcp.exe"
+	}
+	return "agent-session-mcp"
 }
 
 func fetchChecksum(ctx context.Context, repo, tag, asset string) (string, error) {

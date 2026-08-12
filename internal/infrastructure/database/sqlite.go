@@ -31,9 +31,11 @@ func Open(path string) (*gorm.DB, error) {
 	return db, nil
 }
 
-// Migrate applies the embedded schema.
+// Migrate applies pending versioned migrations (migrations/*.sql), recorded in
+// schema_migrations. Databases created by the legacy single-file schema are
+// detected and marked as migrated without re-running.
 func Migrate(db *gorm.DB) error {
-	if err := db.Exec(migrationsSQL).Error; err != nil {
+	if err := migrate(db); err != nil {
 		return fmt.Errorf("run migrations: %w", err)
 	}
 	return nil

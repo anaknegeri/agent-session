@@ -37,6 +37,22 @@ func hookEntry(command string) map[string]any {
 	}
 }
 
+// HasAgentSessionHooks reports whether the given settings map (the parsed
+// contents of ~/.claude/settings.json) contains the agent-session guarded hooks.
+// Used by `agent-session doctor` to verify user-scope wiring.
+func HasAgentSessionHooks(settings map[string]any) bool {
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		return false
+	}
+	for event := range guardedHookCommands() {
+		if !hasAgentSessionHook(hooks, event) {
+			return false
+		}
+	}
+	return true
+}
+
 // EnsureGlobalHooks merges the guarded SessionStart/Stop/PreCompact hooks into
 // ~/.claude/settings.json without touching unrelated settings. Idempotent —
 // re-running does not duplicate entries.

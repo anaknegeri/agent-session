@@ -153,21 +153,22 @@ func (s *CheckpointService) testsState(ctx context.Context, sessionID string) en
 		return entities.TestsState{}
 	}
 	state := entities.TestsState{Status: "unknown"}
-	failed := 0
 	for _, e := range events {
-		switch e.Type {
-		case entities.EventTestFailed:
-			failed++
-			if state.Status == "unknown" {
+		if state.Status == "unknown" {
+			switch e.Type {
+			case entities.EventTestFailed:
 				state.Status = "failed"
-			}
-		case entities.EventTestPassed:
-			if state.Status == "unknown" {
+			case entities.EventTestPassed:
 				state.Status = "passed"
 			}
 		}
+		if e.Type == entities.EventTestPassed {
+			break
+		}
+		if e.Type == entities.EventTestFailed {
+			state.Failures++
+		}
 	}
-	state.Failures = failed
 	return state
 }
 

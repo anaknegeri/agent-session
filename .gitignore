@@ -15,3 +15,6 @@ plugin/bin/
 .vscode/
 .mcp.json
 opencode.json
+
+# third-party editor/tool config not owned by this repo
+.commandcode/

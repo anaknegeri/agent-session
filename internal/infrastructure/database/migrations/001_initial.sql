@@ -1,13 +1,11 @@
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE projects (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL,
     path       TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE sessions (
     id              TEXT PRIMARY KEY,
     project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     title           TEXT NOT NULL,
@@ -22,7 +20,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id, status);
 
-CREATE TABLE IF NOT EXISTS tasks (
+CREATE TABLE tasks (
     id         TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     title      TEXT NOT NULL,
@@ -32,7 +30,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 CREATE INDEX IF NOT EXISTS idx_tasks_session ON tasks(session_id, created_at);
 
-CREATE TABLE IF NOT EXISTS decisions (
+CREATE TABLE decisions (
     id         TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     decision   TEXT NOT NULL,
@@ -42,7 +40,7 @@ CREATE TABLE IF NOT EXISTS decisions (
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id, created_at);
 
-CREATE TABLE IF NOT EXISTS blockers (
+CREATE TABLE blockers (
     id          TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     description TEXT NOT NULL,
@@ -53,7 +51,7 @@ CREATE TABLE IF NOT EXISTS blockers (
 );
 CREATE INDEX IF NOT EXISTS idx_blockers_session ON blockers(session_id, status);
 
-CREATE TABLE IF NOT EXISTS session_events (
+CREATE TABLE session_events (
     id         TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     agent      TEXT NOT NULL,
@@ -63,7 +61,7 @@ CREATE TABLE IF NOT EXISTS session_events (
 );
 CREATE INDEX IF NOT EXISTS idx_session_events_session ON session_events(session_id, created_at);
 
-CREATE TABLE IF NOT EXISTS checkpoints (
+CREATE TABLE checkpoints (
     id          TEXT PRIMARY KEY,
     session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     task_id     TEXT,
@@ -75,7 +73,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 );
 CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON checkpoints(session_id, created_at);
 
-CREATE TABLE IF NOT EXISTS agent_sessions (
+CREATE TABLE agent_sessions (
     id            TEXT PRIMARY KEY,
     session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     agent         TEXT NOT NULL,
@@ -85,7 +83,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_session ON agent_sessions(session_id, started_at);
 
-CREATE TABLE IF NOT EXISTS artifacts (
+CREATE TABLE artifacts (
     id         TEXT PRIMARY KEY,
     session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
     kind       TEXT NOT NULL,
@@ -95,7 +93,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS idx_artifacts_session ON artifacts(session_id, created_at);
 
-CREATE TABLE IF NOT EXISTS knowledge (
+CREATE TABLE knowledge (
     id          TEXT PRIMARY KEY,
     session_id  TEXT,
     kind        TEXT NOT NULL,

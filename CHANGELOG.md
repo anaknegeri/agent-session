@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Versioned SQLite migrations** — `schema_migrations` table + `migrations/*.sql` steps, applied transactionally and idempotently. Legacy databases created by the old single-file schema are auto-detected and marked migrated without data loss.
 - `agent-session migrate` — removes old per-project agent configs and re-wires at user scope
 - CI workflow (`ci.yml`) — runs `go test`, `go vet`, `go build` on every push/PR
 - Auto-update Homebrew formula on release (CI builds bottle + pushes to tap)
@@ -16,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Auto-checkpoint when stale** — no checkpoint in 10 min + dirty tree triggers one on `context.get`
 - **Context nudges** — summary warns about stale checkpoints, unrecorded files, and open blockers
 - **`session.record`** — unified tool: event + decision + next_action + checkpoint in one call
+- Demo GIF in README (`docs/demo.gif`, reproducible via `docs/demo.tape` + vhs)
+- README token benchmark refreshed with fresh live measurements (`./bench/token-benchmark.sh`)
 
 ### Fixed
 - `git diff HEAD` did not detect untracked files, so `workspace.status`/`workspace.diff` reported `dirty:false` for new files
@@ -23,12 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `context.get` called `git status` up to 3x per request (auto-record, staleness check, and nudges each fetched it independently) — now fetched once and shared, cutting git subprocess spawns per call by ~35%
 - `session.record`'s `checkpoint` parameter used a string `"true"/"false"` instead of a JSON boolean
 - Claude Code hooks (`SessionStart`/`Stop`/`PreCompact`) now anchor on `$CLAUDE_PROJECT_DIR` before checking `.agent`/running commands — the CLI resolves its project root from the process's own working directory, which a hook subprocess isn't guaranteed to inherit
+- Test status `failures` count was stale — it accumulated failures from the whole event window even after a later pass; now it only counts consecutive failing runs since the last `test.passed`
 
 ### Changed
 - GitHub Actions upgraded to Node.js 24 (checkout@v5, setup-go@v6, upload/download-artifact@v5)
 - Release workflow Go version aligned with go.mod (1.25)
 - MCP server instructions updated for `session.record` and auto-recording
 - `SyncFileChanges`/`UnrecordedFileCount` duplicate file-diffing logic extracted into a shared helper
+- `agent-session update` now also replaces the `agent-session-mcp` binary sitting next to the main binary, keeping the MCP server in sync with the CLI
+- `agent-session doctor` now checks that installed agent CLIs (claude, opencode, cursor, codex) are wired at user scope and reports per-agent fixes
 
 ## [0.1.4] — 2026-08-12
 
