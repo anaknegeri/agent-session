@@ -16,11 +16,11 @@ jobs:
         os: [darwin, linux, windows]
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.22"
+          go-version: "1.25"
           cache: true
 
       - name: Build
@@ -39,7 +39,7 @@ jobs:
           done
           echo "built for ${{ matrix.os }}/${{ matrix.arch }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.os }}-${{ matrix.arch }}
           path: |
@@ -50,9 +50,13 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - uses: actions/download-artifact@v5
         with:
           path: artifacts
           merge-multiple: true
@@ -68,3 +72,55 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+  homebrew:
+    needs: release
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25"
+
+      - name: Build macOS arm64 bottle
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ldflags="-s -w \
+            -X github.com/anaknegeri/agent-session/pkg/version.Version=${version} \
+            -X github.com/anaknegeri/agent-session/pkg/version.Commit=${{ github.sha }} \
+            -X github.com/anaknegeri/agent-session/pkg/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mkdir -p bottle/agent-session/${version}/bin
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -ldflags "$ldflags" \
+            -o bottle/agent-session/${version}/bin/agent-session ./cmd/agent-session
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -ldflags "$ldflags" \
+            -o bottle/agent-session/${version}/bin/agent-session-mcp ./cmd/agent-session-mcp
+          chmod +x bottle/agent-session/${version}/bin/*
+          cd bottle
+          tar -czf agent-session-${version}.arm64_golden_gate.bottle.tar.gz agent-session
+          shasum -a 256 agent-session-${version}.arm64_golden_gate.bottle.tar.gz
+
+      - name: Upload bottle to release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          gh release upload "${GITHUB_REF_NAME}" \
+            bottle/agent-session-${version}.arm64_golden_gate.bottle.tar.gz --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Regenerate formula and push to tap
+        run: |
+          bash ./scripts/update-homebrew-formula.sh
+          version="${GITHUB_REF_NAME#v}"
+          git clone https://github.com/anaknegeri/homebrew-tap.git /tmp/tap
+          cp packaging/Homebrew/agent-session.rb /tmp/tap/Formula/
+          cd /tmp/tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "bump agent-session to v${version}" || exit 0
+          git push
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
