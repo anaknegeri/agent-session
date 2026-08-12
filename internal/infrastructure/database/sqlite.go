@@ -24,9 +24,18 @@ const openRetryDelay = 25 * time.Millisecond
 func Open(path string) (*gorm.DB, error) {
 	// busy_timeout comes first so it is already in effect when the journal_mode
 	// change below contends with another connection.
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)", path)
+	//
+	// _txlock=immediate makes every transaction take the write lock up front.
+	// SQLite's default deferred transaction starts as a reader, and a reader that
+	// later needs to write cannot wait — the upgrade fails with SQLITE_BUSY
+	// straight away, whatever busy_timeout says. Every transaction here reads
+	// before it writes (find the active session, then supersede it; list open
+	// agent sessions, then close them), so deferred locking failed under
+	// contention: measured 4 of 6 concurrent transactions lost, and 0 of 6 with
+	// this set.
+	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_txlock=immediate", path)
 	if path == ":memory:" {
-		dsn = "file::memory:?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+		dsn = "file::memory:?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_txlock=immediate"
 	}
 
 	cfg := &gorm.Config{

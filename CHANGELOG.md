@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - README token benchmark refreshed with fresh live measurements (`./bench/token-benchmark.sh`)
 
 ### Security
+- **Stored timestamps did not sort chronologically.** Timestamps live in TEXT
+  columns, so every `ORDER BY` compares them as strings, and the encoding
+  (`RFC3339Nano`) trimmed trailing zeros from the fraction — producing variable
+  width. A whole second was written `10:00:00Z` and sorted *after* the later
+  `10:00:00.5Z`, because `'Z' > '.'`. Any "latest" or ordered query could return
+  the wrong row: the event list behind test status and recent-events context, the
+  active-session lookup, and the checkpoint lookup that drives `next_action`,
+  restore and — as of this release — retention pruning, which could therefore have
+  deleted the newest checkpoints instead of the oldest. Writes now use a fixed
+  nine-digit fraction and migration 003 pads existing rows so old and new values
+  compare correctly. This was also the cause of two intermittently failing tests;
+  the suite now runs 15 consecutive times clean where it previously failed most
+  runs.
 - **Agent-authored text could forge sections in the rendered context.** Free-text
   fields (task titles, decisions, blockers, next actions, memory, session titles)
   were rendered with their line breaks intact, so a value containing
@@ -73,6 +86,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   save. `Diff` still returns empty there, since there is no HEAD to diff against.
 
 ### Fixed
+- **Concurrent `session.start` left several active sessions** — start read the
+  active session and then wrote, so processes starting at once all saw none and all
+  created one. Five concurrent starts produced five active sessions, after which
+  `GetActive` picked one arbitrarily and the project's state was split across them.
+  Completing the previous session and creating the new one now happen in one
+  transaction. This is the same race already fixed for `resume`; `start` had been
+  missed.
+- **Read-then-write transactions failed under contention** — SQLite's default
+  deferred transaction starts as a reader, and a reader that later needs to write
+  cannot wait: the upgrade fails with `SQLITE_BUSY` immediately, whatever
+  `busy_timeout` says. Every transaction here reads before it writes, so 4 of 6
+  concurrent transactions were lost. `_txlock=immediate` takes the write lock up
+  front and brings that to 0 of 6.
+- **Project discovery could resolve to an unrelated project** — the search for
+  `.agent/` walked to the filesystem root, so a `.agent/` in `$HOME` captured every
+  uninitialized repository beneath it and sessions were recorded against the wrong
+  project. The search now stops at the git repository boundary, falls back to the
+  repository root, and `AGENT_SESSION_PROJECT` pins the root explicitly.
 - **A partially initialized database was declared already migrated** — legacy
   detection checked for a single table, so a database left incomplete by an
   interrupted first run under the old non-transactional schema script was recorded

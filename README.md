@@ -316,6 +316,28 @@ Every checkpoint records what triggered it — `manual`, `auto` (Stop hook or a
 stale context), `precompact`, or `handoff` — and retention is applied per kind.
 The session's most recent checkpoint is never pruned.
 
+## Project discovery
+
+The MCP server is registered once at user scope, so it can start in a directory
+that has nothing to do with the project being worked on. The project root is
+resolved in this order:
+
+1. `$AGENT_SESSION_PROJECT`, when it names a directory that exists
+2. the nearest ancestor containing `.agent/`, searching no further up than the
+   git repository that contains the starting directory
+3. the git repository root, when there is no `.agent/` inside it yet
+4. the starting directory
+
+The search stops at the repository boundary on purpose. Running `agent-session
+init` in `$HOME` once puts a `.agent/` above every repository, and without that
+boundary any uninitialized repo underneath resolved to that unrelated project and
+recorded its session there. Outside a git repository there is no boundary to
+stop at, which is what `AGENT_SESSION_PROJECT` is for:
+
+```bash
+AGENT_SESSION_PROJECT=/path/to/project agent-session context
+```
+
 ## Automatic recording & nudges
 
 Agent Session is designed so agents never have to remember to record state:

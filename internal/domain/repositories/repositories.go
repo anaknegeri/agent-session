@@ -19,6 +19,10 @@ type SessionRepository interface {
 	GetLatest(ctx context.Context, projectID string) (*entities.Session, error)
 	Update(ctx context.Context, session *entities.Session) error
 	ListByProject(ctx context.Context, projectID string, limit, offset int) ([]*entities.Session, error)
+	// StartExclusive atomically completes the project's active sessions and
+	// inserts the new one, returning the ids it superseded, so concurrent starts
+	// cannot leave more than one active session.
+	StartExclusive(ctx context.Context, session *entities.Session) ([]string, error)
 }
 
 type TaskRepository interface {

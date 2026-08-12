@@ -77,3 +77,83 @@ func git(t *testing.T, dir string, args ...string) {
 		t.Fatalf("git %v: %v: %s", args, err, out)
 	}
 }
+
+// TestFindRootStopsAtRepositoryBoundary covers a real hazard of walking up until
+// the filesystem root: a developer who once ran `agent-session init` in $HOME has
+// a .agent/ directory above every one of their repositories. Every uninitialized
+// repo underneath it then resolved to that unrelated project, so a session would
+// silently be recorded against the wrong one.
+func TestFindRootStopsAtRepositoryBoundary(t *testing.T) {
+	outer := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outer, ".agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := filepath.Join(outer, "unrelated-repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(repo, "pkg", "deep")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ResolveRoot(nested)
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+	want := resolvePath(t, repo)
+	if got != want {
+		t.Errorf("root = %q, want the repository root %q — the search escaped the repo and found an unrelated .agent/", got, want)
+	}
+}
+
+// TestFindRootUsesEnvOverride covers the explicit escape hatch the review asks
+// for: user-scope MCP registration means the server can start in a directory that
+// has nothing to do with the project being worked on.
+func TestFindRootUsesEnvOverride(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := t.TempDir()
+
+	t.Setenv("AGENT_SESSION_PROJECT", project)
+	got, err := ResolveRoot(elsewhere)
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+	if got != resolvePath(t, project) {
+		t.Errorf("root = %q, want the override %q", got, resolvePath(t, project))
+	}
+}
+
+// TestFindRootIgnoresUnusableOverride verifies a stale or misspelled override does
+// not silently hijack discovery.
+func TestFindRootIgnoresUnusableOverride(t *testing.T) {
+	project := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(project, ".agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("AGENT_SESSION_PROJECT", filepath.Join(project, "does-not-exist"))
+	got, err := ResolveRoot(project)
+	if err != nil {
+		t.Fatalf("resolve root: %v", err)
+	}
+	if got != resolvePath(t, project) {
+		t.Errorf("root = %q, want discovery to fall back to %q", got, resolvePath(t, project))
+	}
+}
+
+func resolvePath(t *testing.T, dir string) string {
+	t.Helper()
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved
+	}
+	return abs
+}

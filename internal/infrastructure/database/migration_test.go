@@ -331,3 +331,114 @@ func TestMigrate002BackfillsCheckpointKind(t *testing.T) {
 		}
 	}
 }
+
+// TestTransactionsTakeWriteLockUpFront pins the _txlock=immediate DSN setting. A
+// SQLite transaction that starts as a reader cannot wait for the write lock when
+// it later needs one — the upgrade fails with SQLITE_BUSY immediately, regardless
+// of busy_timeout. Every transaction in this project reads before it writes.
+func TestTransactionsTakeWriteLockUpFront(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "txlock.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if err := db.Exec(`INSERT INTO t (v) VALUES (?)`, i).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const n = 6
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d, err := Open(path)
+			if err != nil {
+				errs <- fmt.Errorf("open: %w", err)
+				return
+			}
+			err = d.Transaction(func(tx *gorm.DB) error {
+				var ids []int
+				if err := tx.Table("t").Pluck("id", &ids).Error; err != nil {
+					return err
+				}
+				return tx.Exec(`UPDATE t SET v = v + 1`).Error
+			})
+			if err != nil {
+				errs <- fmt.Errorf("read-then-write transaction: %w", err)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Errorf("concurrent read-then-write transaction failed: %v", e)
+	}
+}
+
+// TestMigrate003NormalizesTimestamps covers the padding of rows written by the
+// earlier variable-width encoding, so old and new values compare correctly.
+func TestMigrate003NormalizesTimestamps(t *testing.T) {
+	db := newTestDB(t)
+	legacySchema(t, db)
+
+	if err := db.Exec(`INSERT INTO projects (id, name, path, created_at) VALUES ('p1','p','/p','2026-08-12T10:00:00Z')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO sessions (id, project_id, title, status, branch, created_at, updated_at)
+		VALUES ('s1','p1','t','active','main','2026-08-12T10:00:00.5Z','2026-08-12T10:00:00Z')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	rows := []struct{ id, at string }{
+		{"e1", "2026-08-12T10:00:00Z"},
+		{"e2", "2026-08-12T10:00:00.5Z"},
+		{"e3", "2026-08-12T10:00:00.123456789Z"},
+	}
+	for _, r := range rows {
+		if err := db.Exec(`INSERT INTO session_events (id, session_id, agent, type, created_at) VALUES (?,?,'claude','file.changed',?)`,
+			r.id, "s1", r.at).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// every timestamp must now be fixed width, and ordering must be chronological
+	var widths []int
+	if err := db.Raw(`SELECT length(created_at) FROM session_events`).Scan(&widths).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range widths {
+		if w != 30 {
+			t.Errorf("timestamp width = %d, want 30 (fixed nine-digit fraction)", w)
+		}
+	}
+
+	var ordered []string
+	if err := db.Raw(`SELECT id FROM session_events ORDER BY created_at ASC`).Scan(&ordered).Error; err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"e1", "e3", "e2"} // .000000000 < .123456789 < .500000000
+	for i := range want {
+		if i >= len(ordered) || ordered[i] != want[i] {
+			t.Fatalf("event order = %v, want %v — string order still disagrees with time", ordered, want)
+		}
+	}
+
+	// a padded value must still parse
+	var raw string
+	if err := db.Raw(`SELECT created_at FROM projects WHERE id='p1'`).Scan(&raw).Error; err != nil {
+		t.Fatal(err)
+	}
+	if raw != "2026-08-12T10:00:00.000000000Z" {
+		t.Errorf("projects.created_at = %q, want padded", raw)
+	}
+}

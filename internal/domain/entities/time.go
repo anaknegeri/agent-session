@@ -18,8 +18,20 @@ func Now() Timestamp {
 	return Timestamp{Time: time.Now().UTC()}
 }
 
+// TimestampLayout is the on-disk encoding: RFC 3339 with a fixed nine-digit
+// fraction.
+//
+// Timestamps live in TEXT columns, so every ORDER BY compares them as strings and
+// string order has to match chronological order. time.RFC3339Nano trims trailing
+// zeros, which broke that: a whole second rendered as "10:00:00Z" and sorted
+// after the later "10:00:00.5Z", because 'Z' is greater than '.'. Any "latest"
+// query could return the wrong row, including the checkpoint lookup behind
+// next_action, restore and retention pruning. A fixed width removes the
+// possibility.
+const TimestampLayout = "2006-01-02T15:04:05.000000000Z07:00"
+
 func (t Timestamp) Value() (driver.Value, error) {
-	return t.UTC().Format(time.RFC3339Nano), nil
+	return t.UTC().Format(TimestampLayout), nil
 }
 
 func (t *Timestamp) Scan(value any) error {

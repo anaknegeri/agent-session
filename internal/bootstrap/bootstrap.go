@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	app "github.com/anaknegeri/agent-session/internal/application/services"
@@ -174,32 +175,84 @@ func gitInitReminder() string {
 		"then re-run `agent-session init`. Session works in local-only mode meanwhile."
 }
 
-// ResolveRoot returns the project root for dir, walking up to the nearest
-// directory containing .agent/ (or dir itself when none exists). It does not
-// require the project to be initialized yet.
+// ResolveRoot returns the project root for dir. See findRoot for the resolution
+// order. It does not require the project to be initialized yet.
 func ResolveRoot(dir string) (string, error) {
 	return findRoot(dir)
 }
 
-// findRoot walks up from dir until it finds a directory containing .agent/.
-// If none is found the input dir is used. The result is symlink-resolved so
-// every entrypoint (CLI, MCP server) agrees on the same canonical path.
+// ProjectEnvVar names the environment variable that pins the project root
+// explicitly, bypassing directory discovery.
+const ProjectEnvVar = "AGENT_SESSION_PROJECT"
+
+// findRoot resolves the project root, in this order:
+//
+//  1. $AGENT_SESSION_PROJECT, when it names a directory that exists. The MCP
+//     server is registered once at user scope, so it can be started in a
+//     directory unrelated to the project being worked on; this is the explicit
+//     way to say which project that is.
+//  2. The nearest ancestor of dir containing .agent/, searching no further up
+//     than the git repository that contains dir.
+//  3. The git repository root, when dir is inside one but holds no .agent/ yet.
+//  4. dir itself.
+//
+// The search stops at the repository boundary because it used to run to the
+// filesystem root: a developer who had once run `agent-session init` in $HOME
+// had a .agent/ above every repository, so any uninitialized repo underneath
+// resolved to that unrelated project and recorded its session there. Outside a
+// git repository there is no such boundary and the search still runs to the
+// root, which is what ProjectEnvVar exists to override.
+//
+// The result is symlink-resolved so every entrypoint agrees on one canonical
+// path.
 func findRoot(dir string) (string, error) {
-	abs, err := filepath.Abs(dir)
+	if override := strings.TrimSpace(os.Getenv(ProjectEnvVar)); override != "" {
+		if resolved, err := canonicalDir(override); err == nil {
+			return resolved, nil
+		}
+	}
+
+	abs, err := canonicalDir(dir)
 	if err != nil {
-		return "", fmt.Errorf("resolve dir: %w", err)
+		return "", err
 	}
-	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
-		abs = resolved
-	}
+
 	for d := abs; ; d = filepath.Dir(d) {
 		if st, err := os.Stat(filepath.Join(d, config.DirName)); err == nil && st.IsDir() {
+			return d, nil
+		}
+		// The repository root is the outermost directory that can belong to this
+		// project; anything above it is someone else's. With no .agent/ anywhere
+		// inside, the repository root is the answer — it is where one belongs.
+		// Stat covers .git as a file too, which is how worktrees and submodules
+		// record it.
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
 			return d, nil
 		}
 		parent := filepath.Dir(d)
 		if parent == d {
 			break
 		}
+	}
+	return abs, nil
+}
+
+// canonicalDir turns path into an absolute, symlink-resolved directory, failing
+// when it does not exist or is not a directory.
+func canonicalDir(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve dir: %w", err)
+	}
+	if resolved, rerr := filepath.EvalSymlinks(abs); rerr == nil {
+		abs = resolved
+	}
+	st, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("stat dir %s: %w", abs, err)
+	}
+	if !st.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", abs)
 	}
 	return abs, nil
 }

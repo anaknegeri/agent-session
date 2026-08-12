@@ -45,15 +45,6 @@ func (s *SessionService) Start(ctx context.Context, projectID, title, agent stri
 	if projectID == "" {
 		return nil, domainerr.ErrProjectNotFound
 	}
-	active, err := s.store.Sessions().GetActive(ctx, projectID)
-	if err != nil && err != domainerr.ErrNoActiveSession {
-		return nil, err
-	}
-	if active != nil {
-		if err := s.complete(ctx, active.ID); err != nil {
-			return nil, err
-		}
-	}
 	project, err := s.store.Projects().GetByID(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -67,8 +58,16 @@ func (s *SessionService) Start(ctx context.Context, projectID, title, agent stri
 		Branch:    s.branch(ctx, project.Path),
 		LastAgent: agent,
 	}
-	if err := s.store.Sessions().Create(ctx, session); err != nil {
+	// completing the previous session and creating this one must be one step, or
+	// two processes starting at once both see no active session and both create one
+	superseded, err := s.store.Sessions().StartExclusive(ctx, session)
+	if err != nil {
 		return nil, err
+	}
+	for _, id := range superseded {
+		if err := s.finalizeSuperseded(ctx, id); err != nil {
+			return nil, err
+		}
 	}
 
 	agentSession := &entities.AgentSession{
@@ -153,6 +152,24 @@ func (s *SessionService) complete(ctx context.Context, sessionID string) error {
 		return err
 	}
 	return nil
+}
+
+// finalizeSuperseded tidies a session that StartExclusive has already marked
+// completed: its open agent sessions are closed and session.completed recorded.
+func (s *SessionService) finalizeSuperseded(ctx context.Context, sessionID string) error {
+	if err := s.closeActiveAgentSession(ctx, sessionID); err != nil {
+		return err
+	}
+	session, err := s.store.Sessions().GetByID(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	return s.store.Events().Append(ctx, &entities.SessionEvent{
+		ID:        ids.New("evt"),
+		SessionID: sessionID,
+		Agent:     session.LastAgent,
+		Type:      entities.EventSessionCompleted,
+	})
 }
 
 // closeActiveAgentSession ends every agent session for a session that is still
