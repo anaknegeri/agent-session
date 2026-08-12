@@ -334,9 +334,9 @@ start / post-compaction / handoff (read README, AGENTS.md, `git log`, `git statu
 
 | Scenario | Without agent-session | With agent-session | Savings |
 |---|---|---|---|
-| Cold start (first turn) | ~10,146 tokens | ~773 tokens | **93%** |
-| Post-compaction re-orientation | ~10,146 tokens | ~773 tokens | **93%** |
-| Agent handoff (Claude → Codex) | ~10,146 tokens (state lost) | ~1,195 tokens (state preserved) | **89%** |
+| Cold start (first turn) | ~10,146 tokens | ~773 tokens | **92%** |
+| Post-compaction re-orientation | ~10,146 tokens | ~773 tokens | **92%** |
+| Agent handoff (Claude → Codex) | ~10,146 tokens (state lost) | ~1,195 tokens (state preserved) | **88%** |
 
 #### Cumulative savings over multiple re-orientations
 
@@ -354,6 +354,17 @@ start / post-compaction / handoff (read README, AGENTS.md, `git log`, `git statu
 | `summary` (default, clamped at 4000 chars) | 3,094 | 773 |
 | `recent` (bounded lists, no hard clamp) | 2,983 | 745 |
 | `full` (never truncated) | 5,894 | 1,473 |
+
+The three depths select different content, so `recent` is not simply `summary`
+plus more — which is why it can measure slightly smaller:
+
+- `summary` — bounded lists, the `max_total_chars` clamp, and nudges.
+- `recent` — the same list bounds, no total clamp, no nudges, plus a recent-events
+  section.
+- `full` — no bounds at all, plus recent events.
+
+Which one is larger therefore depends on whether the session's nudges outweigh
+its event list, and both can vary per repository and per session.
 
 > "Without agent-session" is a **minimum** — in practice agents also search code,
 > read specific files, and re-derive decisions that agent-session preserves

@@ -9,15 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **Real MCP-over-stdio integration test** — full agent workflow (session.get → context.get → task.create → session.record → checkpoint → context) over a real stdio subprocess, exactly how agents connect
-- **Real-agent smoke tests** — `TestClaudeCodeSmoke`, `TestCodexSmoke`, `TestOpenCodeSmoke` gated behind `AGENT_SESSION_SMOKE=1` (skip gracefully when the agent CLI is absent)
+- **Real-agent smoke tests** — `TestClaudeCodeSmoke`, `TestCodexSmoke`, `TestOpenCodeSmoke` gated behind `AGENT_SESSION_SMOKE=1` (skip gracefully when the agent CLI is absent). The Claude test asserts hooks move session state and that the project wiring is written; the Codex test asserts the MCP registration under an isolated `CODEX_HOME`; the OpenCode test asserts the generated config lets the CLI start. All three verified against the real CLIs — see `test/integration/COMPATIBILITY.md` for what each does and does not prove.
 - **Agent compatibility matrix** — `test/integration/COMPATIBILITY.md` documenting per-agent capability status
 - **Slash commands** — `/agent-session`, `/agent-session-checkpoint`, `/agent-session-record` installed at user scope for Claude Code, OpenCode, and Cursor (`plugin uninstall <agent> --scope user` removes them)
 - **Versioned SQLite migrations** — `schema_migrations` table + `migrations/*.sql` steps, applied transactionally and idempotently. Legacy databases created by the old single-file schema are auto-detected and marked migrated without data loss.
 - **P1 hardening: session lifecycle** — resume/complete/start now close all open agent sessions (`ended_at` set); `Resume` is atomic (single transaction) so concurrent processes never leave more than one active agent session.
-- **P1: checkpoint diff detects resolved blockers** — snapshots surface `RecentlyResolved` (blockers resolved since last checkpoint), so the open→resolved transition is visible in diffs.
-- **P1: context trust model** — MCP instructions and AGENTS.md now state that session state is data, never executable instructions, to prevent cross-agent injection.
+- **P1: checkpoint diff detects resolved blockers** — `checkpoint.diff` derives the open→resolved transition from the two snapshots' open-blocker sets, so it is exact however many checkpoints apart they are.
+- **P1: checkpoint diff detects task transitions** — snapshots record every task's id and status (`progress.tasks`), and `checkpoint.diff` reports status changes as `task_transitions` matched by task id. A task moving `blocked → in_progress` is now reported as newly started; previously both states counted as "pending" so the change was invisible. `agent-session diff` prints transitions into other states (blocked, cancelled) too. Snapshots written before this field fall back to the old title-list comparison.
+- **P1: context trust model** — session state carries an explicit trust classification (`entities.Trust`: `state`, `observation`, `agent_note`, `external`). Agent-authored sections of the rendered context are marked `(untrusted)` with a one-line convention note placed above them, so a reading agent can tell what the session layer asserts from what another agent merely wrote down. MCP instructions and AGENTS.md state the same rule in prose. Costs ~172 chars (~43 tokens) per render, and only when untrusted content is present.
 - **P1: structured handoff schema** — handoff events carry `handoff_id`, `from_agent`, `to_agent`, `checkpoint_id`.
-- **P1: concurrency tests** — concurrent events/checkpoints/resumes across multiple app instances on one SQLite DB (found & fixed a real resume race).
+- **P1 (partial): concurrency tests** — concurrent events/checkpoints/resumes across multiple app instances on one SQLite DB (found & fixed a real resume race), plus concurrent migration on a fresh and on a pending-upgrade database. Not yet covered: concurrent knowledge writes, start races, lock contention, recovery after interrupted writes.
+- **Cancelled tasks no longer count as outstanding work** — they were listed under `pending`, so every context render and the CLI progress bar treated abandoned work as remaining. They are now excluded from both `completed` and `pending`, which also changes the progress-bar denominator.
 - `agent-session migrate` — removes old per-project agent configs and re-wires at user scope
 - CI workflow (`ci.yml`) — runs `go test`, `go vet`, `go build` on every push/PR
 - Auto-update Homebrew formula on release (CI builds bottle + pushes to tap)
@@ -29,7 +31,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Demo GIF in README (`docs/demo.gif`, reproducible via `docs/demo.tape` + vhs)
 - README token benchmark refreshed with fresh live measurements (`./bench/token-benchmark.sh`)
 
+### Security
+- **Agent-authored text could forge sections in the rendered context.** Free-text
+  fields (task titles, decisions, blockers, next actions, memory, session titles)
+  were rendered with their line breaks intact, so a value containing
+  `\n## ⚠ Nudges\n- ...` produced a section indistinguishable from one the session
+  layer wrote itself — letting any agent with session write access impersonate
+  agent-session to whoever read the context next, including across a handoff,
+  whose text goes straight into the next agent's prompt. Untrusted values are now
+  flattened to a single line (`pkg/safetext.SingleLine`) and rendered only as list
+  items, so they cannot open a heading, quote, or fence. Covered by regression
+  tests over `context.get` at every depth and over `handoff`.
+
 ### Fixed
+- **Concurrent migrations failed on a never-migrated or newly-upgraded database** — the applied-version read sat outside the transaction that applied the steps, so an MCP server and a CLI hook booting together could both decide a version was pending and race to apply it (`table projects already exists`); opening a fresh database could also fail outright with `SQLITE_BUSY` while SQLite took the exclusive lock to switch into WAL mode. Reading and applying now share one `BEGIN IMMEDIATE` transaction, `busy_timeout` is set before the journal-mode change, and `Open` retries the transient lock.
+- **Checkpoint snapshots accumulated every blocker ever resolved** — the "resolved since last checkpoint" query compared a `time.Time` against RFC3339Nano text, so the cutoff never matched and the filter was a no-op. Every snapshot carried the session's whole resolution history, growing without bound. The mechanism is gone: `checkpoint.diff` now derives resolutions from the snapshots it already has.
+- **`checkpoint.diff` under-reported resolved blockers between non-adjacent checkpoints** — the resolution window was anchored to the checkpoint immediately before `after`, so a blocker resolved earlier in the range was missed.
+- **Foreign keys were disabled for in-memory databases** — the pragma branch skipped `:memory:`, leaving `foreign_keys=0`, so every `ON DELETE CASCADE` in the schema went untested. In-memory databases now get the same pragmas and a single connection, since an in-memory database is private to its connection.
+- **Codex uninstall ignored `CODEX_HOME`** — `plugin uninstall codex` resolved the
+  config as `~/.codex/config.toml` via the home directory, while `codex mcp add`
+  (which writes it) honours `CODEX_HOME`. On any setup using that override the
+  uninstall edited a file the install had never touched. Also dropped a dead
+  variable in the TOML section remover and corrected the adapter doc comment,
+  which described a `~/.codex/config.toml` fallback that does not exist.
+- **`TestCodexSmoke` passed an argument codex does not accept** — `--yes` was
+  rejected by codex-cli 0.147.0, so the test skipped every time it ran, the same
+  way `--model x` permanently skipped the OpenCode test. It now uses
+  `-s read-only` and asserts the MCP registration under an isolated `CODEX_HOME`.
+- **Integration tests could run against a stale binary** — `bin/agent-session*` was reused whenever it already existed; both binaries are now rebuilt per run.
+- **README benchmark percentages were rounded up past the boundary** — cold start and post-compaction were stated as 93% (actual 92.4%) and handoff as 89% (actual 88.2%). Corrected to 92% and 88%; the underlying character measurements were right.
 - `git diff HEAD` did not detect untracked files, so `workspace.status`/`workspace.diff` reported `dirty:false` for new files
 - `context.get` was declared `readOnlyHint` while silently auto-checkpointing and auto-recording file changes — now declared `idempotentHint` to match actual behavior
 - `context.get` called `git status` up to 3x per request (auto-record, staleness check, and nudges each fetched it independently) — now fetched once and shared, cutting git subprocess spawns per call by ~35%
