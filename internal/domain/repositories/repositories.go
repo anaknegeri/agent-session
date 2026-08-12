@@ -38,7 +38,6 @@ type BlockerRepository interface {
 	Create(ctx context.Context, blocker *entities.Blocker) error
 	ListBySession(ctx context.Context, sessionID string) ([]*entities.Blocker, error)
 	ListOpen(ctx context.Context, sessionID string) ([]*entities.Blocker, error)
-	ListResolved(ctx context.Context, sessionID string, since interface{}) ([]*entities.Blocker, error)
 	Resolve(ctx context.Context, id string, resolvedAt interface{}) error
 }
 

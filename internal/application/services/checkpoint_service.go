@@ -93,23 +93,22 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 	allTasks, _ := s.store.Tasks().ListBySession(ctx, sessionID)
 	completed := make([]string, 0, len(allTasks))
 	pending := make([]string, 0, len(allTasks))
+	taskStates := make([]entities.TaskState, 0, len(allTasks))
 	for _, t := range allTasks {
-		if t.Status == entities.TaskStatusCompleted {
+		taskStates = append(taskStates, entities.TaskState{ID: t.ID, Title: t.Title, Status: t.Status})
+		switch t.Status {
+		case entities.TaskStatusCompleted:
 			completed = append(completed, t.Title)
-		} else {
+		case entities.TaskStatusCancelled:
+			// abandoned work is neither done nor outstanding; listing it as
+			// pending would show it as remaining work in every context render
+		default:
 			pending = append(pending, t.Title)
 		}
 	}
 
 	decisions, _ := s.store.Decisions().ListBySession(ctx, sessionID)
 	blockers, _ := s.store.Blockers().ListOpen(ctx, sessionID)
-
-	// surface blockers resolved since the last checkpoint so checkpoint diffs
-	// can detect the open→resolved transition (snapshot stores open state only).
-	var resolved []*entities.Blocker
-	if latest, err := s.store.Checkpoints().GetLatest(ctx, sessionID); err == nil && !latest.CreatedAt.IsZero() {
-		resolved, _ = s.store.Blockers().ListResolved(ctx, sessionID, latest.CreatedAt.Time.UTC())
-	}
 
 	modified := make([]string, 0, len(workspace.Changes))
 	for _, c := range workspace.Changes {
@@ -136,14 +135,14 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 		Progress: entities.ProgressState{
 			Completed: completed,
 			Pending:   pending,
+			Tasks:     taskStates,
 		},
-		Decisions:        decisions,
-		Files:            entities.FilesState{Modified: modified},
-		Tests:            s.testsState(ctx, sessionID),
-		Blockers:         blockers,
-		RecentlyResolved: resolved,
-		NextAction:       "",
-		LastAgent:        session.LastAgent,
+		Decisions:  decisions,
+		Files:      entities.FilesState{Modified: modified},
+		Tests:      s.testsState(ctx, sessionID),
+		Blockers:   blockers,
+		NextAction: "",
+		LastAgent:  session.LastAgent,
 	}
 
 	// surface the most recent checkpoint's next_action so resumed agents know
@@ -216,6 +215,15 @@ func (s *CheckpointService) ListBySession(ctx context.Context, sessionID string,
 	return s.store.Checkpoints().ListBySession(ctx, sessionID, limit)
 }
 
+// TaskTransition is a task's status change between two checkpoints. An empty
+// From means the task did not exist in the earlier checkpoint.
+type TaskTransition struct {
+	TaskID string `json:"task_id"`
+	Title  string `json:"title"`
+	From   string `json:"from"`
+	To     string `json:"to"`
+}
+
 // SnapshotDiff captures what changed between two checkpoints.
 type SnapshotDiff struct {
 	Before           *entities.Checkpoint `json:"-"`
@@ -228,6 +236,7 @@ type SnapshotDiff struct {
 	ResolvedBlockers []*entities.Blocker  `json:"resolved_blockers"`
 	NewlyCompleted   []string             `json:"newly_completed"`
 	NewlyStarted     []string             `json:"newly_started"`
+	TaskTransitions  []TaskTransition     `json:"task_transitions,omitempty"`
 	NewFiles         []string             `json:"new_files"`
 	NextActionFrom   string               `json:"next_action_from"`
 	NextActionTo     string               `json:"next_action_to"`
@@ -239,7 +248,8 @@ type SnapshotDiff struct {
 func (d *SnapshotDiff) HasChanges() bool {
 	return d.TaskTitleChanged || d.TaskStatusFrom != d.TaskStatusTo ||
 		len(d.NewDecisions) > 0 || len(d.NewBlockers) > 0 || len(d.ResolvedBlockers) > 0 ||
-		len(d.NewlyCompleted) > 0 || len(d.NewlyStarted) > 0 || len(d.NewFiles) > 0 ||
+		len(d.NewlyCompleted) > 0 || len(d.NewlyStarted) > 0 || len(d.TaskTransitions) > 0 ||
+		len(d.NewFiles) > 0 ||
 		d.NextActionFrom != d.NextActionTo || d.CommitFrom != d.CommitTo
 }
 
@@ -279,26 +289,44 @@ func (s *CheckpointService) Diff(ctx context.Context, beforeID, afterID string) 
 		}
 	}
 
+	// snapshots carry open blockers only, so the open→resolved transition is the
+	// set difference between the two: open in before, no longer open in after.
+	// This holds however many checkpoints apart the two are.
 	beforeBlockers := idSet(len(beforeSnap.Blockers))
 	for _, b := range beforeSnap.Blockers {
 		beforeBlockers[b.ID] = true
 	}
-	// resolved blockers are surfaced in RecentlyResolved (snapshot keeps open
-	// blockers only), so compare against that set instead of expecting them in
-	// Blockers of the after snapshot.
-	for _, b := range afterSnap.RecentlyResolved {
-		if beforeBlockers[b.ID] {
+	afterBlockers := idSet(len(afterSnap.Blockers))
+	for _, b := range afterSnap.Blockers {
+		afterBlockers[b.ID] = true
+	}
+	for _, b := range beforeSnap.Blockers {
+		if !afterBlockers[b.ID] {
 			diff.ResolvedBlockers = append(diff.ResolvedBlockers, b)
 		}
 	}
 	for _, b := range afterSnap.Blockers {
-		if !beforeBlockers[b.ID] && b.Status == entities.BlockerStatusOpen {
+		if !beforeBlockers[b.ID] {
 			diff.NewBlockers = append(diff.NewBlockers, b)
 		}
 	}
 
-	diff.NewlyCompleted = sliceDiff(afterSnap.Progress.Completed, beforeSnap.Progress.Completed)
-	diff.NewlyStarted = sliceDiff(afterSnap.Progress.Pending, beforeSnap.Progress.Pending)
+	diff.TaskTransitions = taskTransitions(beforeSnap.Progress.Tasks, afterSnap.Progress.Tasks)
+	if len(beforeSnap.Progress.Tasks) == 0 && len(afterSnap.Progress.Tasks) == 0 {
+		// snapshots written before Progress.Tasks existed: fall back to comparing
+		// the rendered title lists, which is all those snapshots recorded
+		diff.NewlyCompleted = sliceDiff(afterSnap.Progress.Completed, beforeSnap.Progress.Completed)
+		diff.NewlyStarted = sliceDiff(afterSnap.Progress.Pending, beforeSnap.Progress.Pending)
+	} else {
+		for _, tr := range diff.TaskTransitions {
+			switch tr.To {
+			case entities.TaskStatusCompleted:
+				diff.NewlyCompleted = append(diff.NewlyCompleted, tr.Title)
+			case entities.TaskStatusInProgress:
+				diff.NewlyStarted = append(diff.NewlyStarted, tr.Title)
+			}
+		}
+	}
 
 	diff.NewFiles = sliceDiff(afterSnap.Files.Modified, beforeSnap.Files.Modified)
 
@@ -316,6 +344,31 @@ func idSet(n int) map[string]bool {
 		return map[string]bool{}
 	}
 	return make(map[string]bool, n)
+}
+
+// taskTransitions reports every task whose status changed, matched by task ID so
+// a rename does not read as a different task and two tasks sharing a title do
+// not collapse into one.
+func taskTransitions(before, after []entities.TaskState) []TaskTransition {
+	previous := make(map[string]string, len(before))
+	for _, t := range before {
+		previous[t.ID] = t.Status
+	}
+
+	var transitions []TaskTransition
+	for _, t := range after {
+		from, existed := previous[t.ID]
+		if existed && from == t.Status {
+			continue
+		}
+		transitions = append(transitions, TaskTransition{
+			TaskID: t.ID,
+			Title:  t.Title,
+			From:   from,
+			To:     t.Status,
+		})
+	}
+	return transitions
 }
 
 func sliceDiff(after, before []string) []string {

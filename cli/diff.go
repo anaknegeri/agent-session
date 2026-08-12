@@ -7,6 +7,7 @@ import (
 
 	appsvc "github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 func newDiffCmd() *cobra.Command {
@@ -106,6 +107,19 @@ func renderDiff(beforeID, afterID string, d *appsvc.SnapshotDiff) {
 	}
 	for _, t := range d.NewlyStarted {
 		fmt.Printf("• Started: %s\n", t)
+	}
+	// transitions into any other state (blocked, cancelled) are real signals and
+	// would otherwise be invisible, since only started/completed print above
+	for _, tr := range d.TaskTransitions {
+		switch tr.To {
+		case entities.TaskStatusCompleted, entities.TaskStatusInProgress:
+			continue
+		}
+		if tr.From == "" {
+			yellow("• %s: %s\n", tr.Title, tr.To)
+			continue
+		}
+		yellow("• %s: %s → %s\n", tr.Title, tr.From, tr.To)
 	}
 
 	for _, f := range d.NewFiles {
