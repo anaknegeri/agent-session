@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.6] — 2026-08-12
+
+Includes the entries below that shipped in 0.1.5, which was tagged without a
+section of its own.
+
 ### Added
 - **Real MCP-over-stdio integration test** — full agent workflow (session.get → context.get → task.create → session.record → checkpoint → context) over a real stdio subprocess, exactly how agents connect
 - **Real-agent smoke tests** — `TestClaudeCodeSmoke`, `TestCodexSmoke`, `TestOpenCodeSmoke` gated behind `AGENT_SESSION_SMOKE=1` (skip gracefully when the agent CLI is absent). The Claude test asserts hooks move session state and that the project wiring is written; the Codex test asserts the MCP registration under an isolated `CODEX_HOME`; the OpenCode test asserts the generated config lets the CLI start. All three verified against the real CLIs — see `test/integration/COMPATIBILITY.md` for what each does and does not prove.
@@ -30,41 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`session.record`** — unified tool: event + decision + next_action + checkpoint in one call
 - Demo GIF in README (`docs/demo.gif`, reproducible via `docs/demo.tape` + vhs)
 - README token benchmark refreshed with fresh live measurements (`./bench/token-benchmark.sh`)
-
-### Security
-- **Stored timestamps did not sort chronologically.** Timestamps live in TEXT
-  columns, so every `ORDER BY` compares them as strings, and the encoding
-  (`RFC3339Nano`) trimmed trailing zeros from the fraction — producing variable
-  width. A whole second was written `10:00:00Z` and sorted *after* the later
-  `10:00:00.5Z`, because `'Z' > '.'`. Any "latest" or ordered query could return
-  the wrong row: the event list behind test status and recent-events context, the
-  active-session lookup, and the checkpoint lookup that drives `next_action`,
-  restore and — as of this release — retention pruning, which could therefore have
-  deleted the newest checkpoints instead of the oldest. Writes now use a fixed
-  nine-digit fraction and migration 003 pads existing rows so old and new values
-  compare correctly. This was also the cause of two intermittently failing tests;
-  the suite now runs 15 consecutive times clean where it previously failed most
-  runs.
-- **Agent-authored text could forge sections in the rendered context.** Free-text
-  fields (task titles, decisions, blockers, next actions, memory, session titles)
-  were rendered with their line breaks intact, so a value containing
-  `\n## ⚠ Nudges\n- ...` produced a section indistinguishable from one the session
-  layer wrote itself — letting any agent with session write access impersonate
-  agent-session to whoever read the context next, including across a handoff,
-  whose text goes straight into the next agent's prompt. Untrusted values are now
-  flattened to a single line (`pkg/safetext.SingleLine`) and rendered only as list
-  items, so they cannot open a heading, quote, or fence. Covered by regression
-  tests over `context.get` at every depth and over `handoff`.
-
-### Added
 - **Codex session hooks** — `init --only codex` now writes `SessionStart` (resume)
   and `Stop` (checkpoint) hooks into `$CODEX_HOME/hooks.json` alongside the MCP
   registration, so a Codex session resumes and checkpoints whether or not the model
   chooses to call the tools — the reliability Claude Code already had. The schema
   was taken from an installed Codex plugin's own `hooks/hooks.json`, not guessed.
   `hooks.json` is shared with plugins, so wiring merges into it, is idempotent, and
-  uninstall removes only agent-session's entries. Codex tracks a `trusted_hash` per
-  hook, so a first run may require trust approval; that path is untested.
+  uninstall removes only agent-session's entries. Codex will not *run* a newly
+  written hook until it is approved once: `hooks/list` on codex-cli 0.147.0 reports
+  both entries as `source: "user"`, `enabled: true`, `trustStatus: "untrusted"`,
+  and untrusted hooks are silently skipped — including under `codex exec`, which
+  cannot prompt. Approval happens in the Codex TUI's hooks review and records a
+  `trusted_hash` under `[hooks.state]` in `config.toml`. agent-session deliberately
+  does not write that hash — it is the gate that stops an installer from wiring
+  shell commands into someone's agent — so `init` prints the one-time approval step
+  instead. The post-approval run remains unverified.
 - **P2: checkpoint kinds and retention** — checkpoints record what triggered them
   (`manual`, `auto`, `precompact`, `handoff`) in their own `kind` column instead of
   leaving it implied by a free-text label, and each kind has its own retention
@@ -92,6 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   already fixed for repositories with a HEAD, left behind in this one case. It made
   auto-record and auto-checkpoint treat the very first session as having nothing to
   save. `Diff` still returns empty there, since there is no HEAD to diff against.
+- GitHub Actions upgraded to Node.js 24 (checkout@v5, setup-go@v6, upload/download-artifact@v5)
+- Release workflow Go version aligned with go.mod (1.25)
+- MCP server instructions updated for `session.record` and auto-recording
+- `SyncFileChanges`/`UnrecordedFileCount` duplicate file-diffing logic extracted into a shared helper
+- `agent-session update` now also replaces the `agent-session-mcp` binary sitting next to the main binary, keeping the MCP server in sync with the CLI
+- `agent-session doctor` now checks that installed agent CLIs (claude, opencode, cursor, codex) are wired at user scope and reports per-agent fixes
 
 ### Fixed
 - **Concurrent `session.start` left several active sessions** — start read the
@@ -158,13 +149,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Claude Code hooks (`SessionStart`/`Stop`/`PreCompact`) now anchor on `$CLAUDE_PROJECT_DIR` before checking `.agent`/running commands — the CLI resolves its project root from the process's own working directory, which a hook subprocess isn't guaranteed to inherit
 - Test status `failures` count was stale — it accumulated failures from the whole event window even after a later pass; now it only counts consecutive failing runs since the last `test.passed`
 
-### Changed
-- GitHub Actions upgraded to Node.js 24 (checkout@v5, setup-go@v6, upload/download-artifact@v5)
-- Release workflow Go version aligned with go.mod (1.25)
-- MCP server instructions updated for `session.record` and auto-recording
-- `SyncFileChanges`/`UnrecordedFileCount` duplicate file-diffing logic extracted into a shared helper
-- `agent-session update` now also replaces the `agent-session-mcp` binary sitting next to the main binary, keeping the MCP server in sync with the CLI
-- `agent-session doctor` now checks that installed agent CLIs (claude, opencode, cursor, codex) are wired at user scope and reports per-agent fixes
+### Security
+- **Stored timestamps did not sort chronologically.** Timestamps live in TEXT
+  columns, so every `ORDER BY` compares them as strings, and the encoding
+  (`RFC3339Nano`) trimmed trailing zeros from the fraction — producing variable
+  width. A whole second was written `10:00:00Z` and sorted *after* the later
+  `10:00:00.5Z`, because `'Z' > '.'`. Any "latest" or ordered query could return
+  the wrong row: the event list behind test status and recent-events context, the
+  active-session lookup, and the checkpoint lookup that drives `next_action`,
+  restore and — as of this release — retention pruning, which could therefore have
+  deleted the newest checkpoints instead of the oldest. Writes now use a fixed
+  nine-digit fraction and migration 003 pads existing rows so old and new values
+  compare correctly. This was also the cause of two intermittently failing tests;
+  the suite now runs 15 consecutive times clean where it previously failed most
+  runs.
+- **Agent-authored text could forge sections in the rendered context.** Free-text
+  fields (task titles, decisions, blockers, next actions, memory, session titles)
+  were rendered with their line breaks intact, so a value containing
+  `\n## ⚠ Nudges\n- ...` produced a section indistinguishable from one the session
+  layer wrote itself — letting any agent with session write access impersonate
+  agent-session to whoever read the context next, including across a handoff,
+  whose text goes straight into the next agent's prompt. Untrusted values are now
+  flattened to a single line (`pkg/safetext.SingleLine`) and rendered only as list
+  items, so they cannot open a heading, quote, or fence. Covered by regression
+  tests over `context.get` at every depth and over `handoff`.
 
 ## [0.1.4] — 2026-08-12
 
