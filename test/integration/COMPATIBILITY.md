@@ -12,7 +12,7 @@ breaks.
 | Agent | MCP tools | Context | Checkpoint | Handoff | Hooks | Slash cmds |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | Claude Code | ✅ | ✅ | ✅ | 🟡 | ✅ | 🟡 |
-| Codex | ✅ | 🟡 | 🟡 | 🟡 | 🟡 wired, end-to-end unverified | — |
+| Codex | ✅ | 🟡 | 🟡 | 🟡 | 🟡 registered, needs one-time trust | — |
 | OpenCode | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via instructions only | 🟡 |
 | Cursor | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via rules only | 🟡 |
 | Cline | 🟡 | 🟡 | 🟡 | ⚠ | ⚠ via rules only | — |
@@ -54,15 +54,29 @@ skipped, which is the intended behaviour of the skip path.
 
 ### Not covered
 
-- **Codex hooks firing.** `init --only codex` now writes `SessionStart` and `Stop`
-  hooks into `$CODEX_HOME/hooks.json`, using the same schema Codex plugins use
-  (verified against an installed plugin's `hooks/hooks.json`). The file handling is
-  tested: merge, idempotent re-install, and uninstall that removes only our
-  entries. What is **not** verified is a real Codex run firing them. Codex records a
-  `trusted_hash` per hook under `[hooks.state]` and has a
-  `--dangerously-bypass-hook-trust` flag, so a first run may require trust
-  approval. Confirming this needs either the developer's real `~/.codex` (which a
-  test must not modify) or a `CODEX_HOME` holding credentials.
+- **Codex hooks firing.** `init --only codex` writes `SessionStart` and `Stop`
+  hooks into `$CODEX_HOME/hooks.json`, using the same schema Codex plugins use.
+  The file handling is tested: merge, idempotent re-install, and uninstall that
+  removes only our entries.
+
+  Registration is confirmed against codex-cli 0.147.0 on the real `~/.codex`:
+  `hooks/list` on the app-server returns both entries with `source: "user"`,
+  `sourcePath: ~/.codex/hooks.json`, `enabled: true`, keys
+  `~/.codex/hooks.json:session_start:0:0` and `:stop:0:0`. So the path and the
+  schema are right.
+
+  They report `trustStatus: "untrusted"` and therefore do **not** run: Codex only
+  executes a hook after it is approved once, recording `trusted_hash` under
+  `[hooks.state."<key>"]` in `config.toml`. Approval happens in the Codex TUI
+  (its hooks review screen); `codex exec` cannot prompt, so a non-interactive run
+  silently skips them. Two `codex exec` runs confirmed this — a probe script wired
+  through `hooks.json`, and the same script passed as `-c hooks.SessionStart=...`,
+  neither of which executed, while the already-trusted `warp` plugin's hooks did.
+
+  agent-session deliberately does not write `trusted_hash` itself: that is the
+  approval gate protecting the user from an installer wiring shell commands into
+  their agent. `agent-session init` prints the one-time approval step instead.
+  What remains unverified is the post-approval run.
 - **Handoff between two real agents.** Exercised only through the in-process and
   stdio tests, never with two live CLIs.
 - **Cursor and Cline.** Wiring is generated and manually checked; no smoke test.

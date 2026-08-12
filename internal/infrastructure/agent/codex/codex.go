@@ -63,6 +63,12 @@ const hookMarker = "agent-session"
 //
 // The file is shared with plugin-provided hooks, so it is merged rather than
 // replaced.
+//
+// Codex discovers these entries (`hooks/list` reports them as source "user",
+// enabled) but will not execute them until the user approves them once, which
+// records a trusted_hash under [hooks.state] in config.toml. Writing that hash
+// here would defeat the gate that stops an installer from wiring shell commands
+// into someone's agent, so setup asks the user to approve instead.
 func (a *Adapter) Install(ctx context.Context) error {
 	dir, err := configDir()
 	if err != nil {

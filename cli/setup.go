@@ -148,6 +148,9 @@ func installCodex(bin string) {
 		return
 	}
 	green("✓ codex: mcp_servers.agent-session + hooks (auto resume/checkpoint)\n")
+	// Codex will not run a newly written hook until it has been approved once,
+	// so say so here rather than let it look wired but silently inert.
+	yellow("  codex hooks start untrusted: run `codex`, approve agent-session in the hooks review, once per machine\n")
 }
 
 func installCursor(dir, bin string) {
