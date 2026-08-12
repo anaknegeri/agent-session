@@ -105,7 +105,7 @@ agent-session plugin install claude --scope user
 
 ```bash
 cd your-project
-agent-session init                # one command: init + wire agents at user scope (context7-style)
+agent-session init                # one command: init + wire agents at user scope
 agent-session start "Implement OAuth2 PKCE"
 agent-session status              # progress, blocked, next
 agent-session checkpoint --next-action "Fix refresh token rotation"
@@ -131,7 +131,7 @@ or `--only claude|opencode|codex` to wire a single agent.
 
 | Command | Description |
 |---|---|
-| `agent-session init` | One-command setup: init + wire agents at user scope (context7-style) (`--only`, `--no-agents`, `--project`). Alias: `setup` |
+| `agent-session init` | One-command setup: init + wire agents at user scope (`--only`, `--no-agents`, `--project`). Alias: `setup` |
 | `agent-session start [title]` | Start a new session (`-t, --title`) |
 | `agent-session status` | Show current session state |
 | `agent-session ui` | Full-screen dashboard: tasks, progress, decisions, blockers, events, tests |
@@ -163,7 +163,7 @@ or `--only claude|opencode|codex` to wire a single agent.
 ## Make every agent use Agent Session automatically
 
 One command per project — it initializes if needed and wires the agent-session
-MCP server **once at user scope** (context7-style), so your project stays clean:
+MCP server **once at user scope**, so your project stays clean:
 
 ```bash
 cd your-project
@@ -185,7 +185,7 @@ What `init` does (idempotent, safe to re-run):
   - **Cline** — no user scope; wire per-project with `--only cline`
 
 The MCP server resolves the project root from the working directory, so the
-same user-scope registration works in every project — like context7, no per-project
+same user-scope registration works in every project, with no per-project
 config pollution.
 
 Prefer per-project wiring? Use `agent-session init --project`, or `--only <agent>`

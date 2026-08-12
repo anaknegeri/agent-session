@@ -19,9 +19,9 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "init",
 		Aliases: []string{"setup"},
-		Short:   "One-command setup: init the project and wire agents at user scope (like context7)",
+		Short:   "One-command setup: init the project and wire agents at user scope ",
 		Long: "Initializes the project (creates .agent/, starts a session) when needed.\n" +
-			"By default it wires the agent-session MCP server ONCE at user scope (like context7)\n" +
+			"By default it wires the agent-session MCP server ONCE at user scope \n" +
 			"for the agents installed on this machine, so projects stay clean. Use --project to\n" +
 			"write per-project config instead, --only to wire a single agent, or --no-agents for\n" +
 			"the session layer only.\n" +
@@ -61,7 +61,7 @@ func newInitCmd() *cobra.Command {
 			}
 
 			if only == "" {
-				// default: wire at user scope (context7-style) for installed agents
+				// default: wire at user scope  for installed agents
 				wired := 0
 				for _, a := range agent.DetectInstalled() {
 					if !a.Present {
@@ -93,7 +93,7 @@ func newInitCmd() *cobra.Command {
 	return cmd
 }
 
-// installAgentGlobal wires the MCP server at user scope (context7-style) so no
+// installAgentGlobal wires the MCP server at user scope  so no
 // per-project config files are created. Fallbacks write the global config file.
 func installAgentGlobal(bin, name string) {
 	switch name {
