@@ -7,3 +7,11 @@ plugin/bin/
 *.db-wal
 *.db-shm
 .DS_Store
+
+# per-project agent wiring (user-scope by default, like context7)
+.claude/
+.clinerules
+.cursor/
+.vscode/
+.mcp.json
+opencode.json

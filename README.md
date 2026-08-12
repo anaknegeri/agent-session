@@ -105,7 +105,7 @@ agent-session plugin install claude --scope user
 
 ```bash
 cd your-project
-agent-session init                # one command, like `git init`: init + wire every agent
+agent-session init                # one command: init + wire agents at user scope (context7-style)
 agent-session start "Implement OAuth2 PKCE"
 agent-session status              # progress, blocked, next
 agent-session checkpoint --next-action "Fix refresh token rotation"
@@ -131,7 +131,7 @@ or `--only claude|opencode|codex` to wire a single agent.
 
 | Command | Description |
 |---|---|
-| `agent-session init` | One-command setup (like `git init`): init + wire agents (`--only`, `--no-agents`). Alias: `setup` |
+| `agent-session init` | One-command setup: init + wire agents at user scope (context7-style) (`--only`, `--no-agents`, `--project`). Alias: `setup` |
 | `agent-session start [title]` | Start a new session (`-t, --title`) |
 | `agent-session status` | Show current session state |
 | `agent-session ui` | Full-screen dashboard: tasks, progress, decisions, blockers, events, tests |
@@ -152,7 +152,7 @@ or `--only claude|opencode|codex` to wire a single agent.
 | `agent-session plugin pack` | Build the Agent Plugin package |
 | `agent-session plugin install <agent>` | Wire an agent: `claude`, `codex`, `opencode`, `cursor`, `cline` (`--scope project|user` for claude) |
 | `agent-session plugin uninstall <agent>` | Remove the wiring |
-| `agent-session setup` | Wire every agent + AGENTS.md for always-on behavior (`--only`) |
+| `agent-session setup` | Wire agents at user scope + AGENTS.md for always-on behavior (`--only`, `--project`) |
 | `agent-session memory put <content>` | Store knowledge (`-k kind`) |
 | `agent-session memory list` | List knowledge (`-k kind`, `-n limit`) |
 | `agent-session memory search <query>` | Full-text search knowledge |
@@ -162,36 +162,35 @@ or `--only claude|opencode|codex` to wire a single agent.
 
 ## Make every agent use Agent Session automatically
 
-One command per project, modeled after `git init` — it initializes if needed and
-wires everything (idempotent):
+One command per project — it initializes if needed and wires the agent-session
+MCP server **once at user scope** (context7-style), so your project stays clean:
 
 ```bash
 cd your-project
 agent-session init
 ```
 
-This wires the "always-on" integration (auto-resume, UC-05) in one step:
+What `init` does (idempotent, safe to re-run):
+- **`.agent/`** — project session state (required, per-project by design).
 - **AGENTS.md** — appends a mandatory workflow section read by OpenCode, Codex,
   Cursor and Claude Code: agents first call `session.get` + `context.get`, track
   work with `task.*` / `decision.*` / `blocker.*` / `event.append`, and create a
   checkpoint before finishing.
-- **Claude Code** — `.claude/CLAUDE.md` + hooks: `SessionStart` runs
-  `agent-session resume` (context injected into the conversation), `Stop` runs
-  `agent-session checkpoint`.
-- **OpenCode** — `opencode.json` gets `agent.instructions.system` (verified:
-  the agent calls the session tools on its own, no prompting needed).
-- **Codex** — `codex mcp add agent-session`.
-- **Cursor** — `.cursor/mcp.json` (MCP server) + `.cursor/rules/agent-session.mdc` (always-on instructions).
-- **Cline** — `.clinerules` (instructions) + `.vscode/settings.json` (`cline.mcpServers`).
+- **User-scope MCP registration** (only for agents installed on this machine,
+  no per-project config files created):
+  - **Claude Code** — `claude mcp add --scope user agent-session`
+  - **OpenCode** — `~/.config/opencode/opencode.json`
+  - **Codex** — `codex mcp add agent-session` (global by default)
+  - **Cursor** — `~/.cursor/mcp.json`
+  - **Cline** — no user scope; wire per-project with `--only cline`
 
-Idempotent — re-running `agent-session setup` is safe.
+The MCP server resolves the project root from the working directory, so the
+same user-scope registration works in every project — like context7, no per-project
+config pollution.
 
-To make Agent Session visible in **every** Claude Code project, additionally register
-at user scope:
-
-```bash
-agent-session plugin install claude --scope user
-```
+Prefer per-project wiring? Use `agent-session init --project`, or `--only <agent>`
+to wire a single agent into this project only. `--no-agents` keeps the session
+layer only.
 
 ---
 
