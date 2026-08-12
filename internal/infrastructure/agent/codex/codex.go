@@ -11,8 +11,8 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
-// Adapter configures OpenAI Codex via `codex mcp add`, falling back to
-// writing ~/.codex/config.toml.
+// Adapter configures OpenAI Codex through `codex mcp add`, which writes the
+// server into the Codex config for us and honours CODEX_HOME.
 type Adapter struct{}
 
 func NewAdapter() *Adapter {
@@ -43,11 +43,11 @@ func (a *Adapter) Install(ctx context.Context) error {
 }
 
 func (a *Adapter) Uninstall(ctx context.Context) error {
-	home, err := os.UserHomeDir()
+	dir, err := configDir()
 	if err != nil {
-		return fmt.Errorf("home dir: %w", err)
+		return err
 	}
-	cfg := filepath.Join(home, ".codex", "config.toml")
+	cfg := filepath.Join(dir, "config.toml")
 	data, err := os.ReadFile(cfg)
 	if err != nil {
 		return nil
@@ -56,11 +56,23 @@ func (a *Adapter) Uninstall(ctx context.Context) error {
 	return os.WriteFile(cfg, []byte(out), 0o644)
 }
 
+// configDir resolves Codex's config directory the same way Codex does, so an
+// uninstall edits the config that `codex mcp add` actually wrote.
+func configDir() (string, error) {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return home, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("home dir: %w", err)
+	}
+	return filepath.Join(home, ".codex"), nil
+}
+
 func removeMCPSection(toml, server string) string {
 	lines := strings.Split(toml, "\n")
 	var result []string
 	skip := false
-	inMCPServers := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "[mcp_servers."+server+"]") {
@@ -74,10 +86,6 @@ func removeMCPSection(toml, server string) string {
 				continue
 			}
 		}
-		if strings.HasPrefix(trimmed, "[mcp_servers]") {
-			inMCPServers = true
-		}
-		_ = inMCPServers
 		result = append(result, line)
 	}
 	return strings.Join(result, "\n")
