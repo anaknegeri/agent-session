@@ -9,6 +9,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/pkg/safetext"
 )
 
 const (
@@ -80,7 +81,7 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 		if len(events) > 0 {
 			text += "\n## Recent events\n"
 			for _, e := range events {
-				text += fmt.Sprintf("- %s [%s]\n", e.Type, e.Agent)
+				text += fmt.Sprintf("- %s [%s]\n", safetext.SingleLine(e.Type), safetext.SingleLine(e.Agent))
 			}
 		}
 	}
@@ -107,9 +108,10 @@ func (s *ContextService) injectMemory(ctx context.Context, text string, snapshot
 	if err != nil || len(hits) == 0 {
 		return text
 	}
-	text += "\n## Relevant memory\n"
+	text += "\n## Relevant memory " + string(entities.TrustAgentNote.Label()) + "\n"
 	for _, h := range hits {
-		text += fmt.Sprintf("- %s\n", truncateString(h.Content, s.budget.MaxItemChars))
+		// promoted from agent-authored content, so it carries the same risk
+		text += fmt.Sprintf("- %s\n", truncateString(safetext.SingleLine(h.Content), s.budget.MaxItemChars))
 	}
 	return text
 }
@@ -137,7 +139,7 @@ func (s *ContextService) addNudges(ctx context.Context, snapshot *entities.Snaps
 	// open blockers with no resolution
 	for _, b := range snapshot.Blockers {
 		if b.Status == entities.BlockerStatusOpen {
-			snapshot.Nudges = append(snapshot.Nudges, fmt.Sprintf("⚠ Open blocker: %s", truncateString(b.Description, 60)))
+			snapshot.Nudges = append(snapshot.Nudges, fmt.Sprintf("⚠ Open blocker: %s", truncateString(safetext.SingleLine(b.Description), 60)))
 		}
 	}
 }
