@@ -1,6 +1,10 @@
 package database
 
 import (
+	"context"
+	"fmt"
+	"path/filepath"
+	"sync"
 	"testing"
 
 	"gorm.io/gorm"
@@ -107,5 +111,105 @@ func TestMigrateAdditive(t *testing.T) {
 	// re-run must still succeed (idempotent)
 	if err := Migrate(db); err != nil {
 		t.Fatalf("re-migrate: %v", err)
+	}
+}
+
+// TestMigrateConcurrentFresh simulates the real boot pattern: an MCP server and
+// a CLI hook opening the same never-migrated database at the same time. Every
+// caller must succeed, and 001 must be recorded exactly once.
+func TestMigrateConcurrentFresh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "concurrent.db")
+
+	const callers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	start := make(chan struct{})
+
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			db, err := Open(path)
+			if err != nil {
+				errs <- fmt.Errorf("open: %w", err)
+				return
+			}
+			if err := Migrate(db); err != nil {
+				errs <- fmt.Errorf("migrate: %w", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for e := range errs {
+		t.Errorf("concurrent migrate failed: %v", e)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int64
+	if err := db.Table("schema_migrations").Where("version = ?", "001").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected version 001 recorded exactly once, got %d", n)
+	}
+}
+
+// TestMigrateConcurrentPendingUpgrade covers the upgrade path the versioned
+// engine exists for: an already-migrated database gets a new pending version
+// while several processes boot at once.
+func TestMigrateConcurrentPendingUpgrade(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "upgrade.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	// a genuinely pending step every caller will try to apply at the same time
+	pending := []migration{{
+		version: "999",
+		sql:     `CREATE TABLE concurrent_upgrade_probe (id TEXT PRIMARY KEY)`,
+	}}
+
+	const callers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	start := make(chan struct{})
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			d, err := Open(path)
+			if err != nil {
+				errs <- fmt.Errorf("open: %w", err)
+				return
+			}
+			if err := migrate(context.Background(), d, pending); err != nil {
+				errs <- fmt.Errorf("migrate: %w", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Errorf("concurrent upgrade failed: %v", e)
+	}
+
+	var n int64
+	if err := db.Table("schema_migrations").Where("version = ?", "999").Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected pending version applied exactly once, got %d", n)
 	}
 }

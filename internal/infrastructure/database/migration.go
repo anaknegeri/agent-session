@@ -1,6 +1,8 @@
 package database
 
 import (
+	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"sort"
@@ -41,26 +43,32 @@ func loadMigrations() ([]migration, error) {
 	return ms, nil
 }
 
-// appliedVersions returns the set of migration versions already recorded.
-func appliedVersions(db *gorm.DB) (map[string]bool, error) {
-	// ensure the tracking table exists
-	if err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
+// appliedVersions returns the set of migration versions already recorded,
+// creating the tracking table when it does not exist yet.
+func appliedVersions(ctx context.Context, conn *sql.Conn) (map[string]bool, error) {
+	if _, err := conn.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
 		version    TEXT PRIMARY KEY,
 		applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-	)`).Error; err != nil {
+	)`); err != nil {
 		return nil, fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	var rows []struct {
-		Version string
-	}
-	if err := db.Table("schema_migrations").Select("version").Scan(&rows).Error; err != nil {
+	rows, err := conn.QueryContext(ctx, `SELECT version FROM schema_migrations`)
+	if err != nil {
 		return nil, fmt.Errorf("read schema_migrations: %w", err)
 	}
+	defer rows.Close()
 
-	applied := make(map[string]bool, len(rows))
-	for _, r := range rows {
-		applied[r.Version] = true
+	applied := make(map[string]bool)
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, fmt.Errorf("scan schema_migrations: %w", err)
+		}
+		applied[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate schema_migrations: %w", err)
 	}
 	return applied, nil
 }
@@ -68,52 +76,91 @@ func appliedVersions(db *gorm.DB) (map[string]bool, error) {
 // legacySchemaDetected reports whether tables were created by the pre-versioned
 // migrations.sql (CREATE TABLE IF NOT EXISTS) that never recorded a version.
 // When true, the engine records the legacy schema as applied without running it.
-func legacySchemaDetected(db *gorm.DB) bool {
-	var count int64
-	err := db.Table("projects").Count(&count).Error
-	return err == nil
+func legacySchemaDetected(ctx context.Context, conn *sql.Conn) (bool, error) {
+	var n int
+	err := conn.QueryRowContext(ctx,
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'projects'`).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("detect legacy schema: %w", err)
+	}
+	return n > 0, nil
 }
 
 // migrate applies pending versioned migrations. A database created by the old
 // single-file migrations.sql (tables exist but no schema_migrations rows) is
 // treated as already at version 001.
-func migrate(db *gorm.DB) error {
-	applied, err := appliedVersions(db)
+//
+// Reading the applied set and applying the pending steps happen inside one
+// BEGIN IMMEDIATE transaction. The write lock is taken up front so that
+// concurrent processes (the MCP server and a CLI hook booting together) queue
+// on it instead of both concluding a version is pending and racing to apply it.
+func migrate(ctx context.Context, db *gorm.DB, ms []migration) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("get sql db: %w", err)
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("begin migration transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(ctx, "ROLLBACK")
+		}
+	}()
+
+	applied, err := appliedVersions(ctx, conn)
 	if err != nil {
 		return err
 	}
 
 	// Backward compatibility: an existing DB from the pre-versioned era has the
 	// tables but no recorded versions. Mark 001 as applied without re-running.
-	if len(applied) == 0 && legacySchemaDetected(db) {
-		if err := db.Exec(`INSERT OR IGNORE INTO schema_migrations (version) VALUES ('001')`).Error; err != nil {
-			return fmt.Errorf("record legacy schema: %w", err)
+	if len(applied) == 0 {
+		legacy, err := legacySchemaDetected(ctx, conn)
+		if err != nil {
+			return err
 		}
-		applied["001"] = true
-	}
-
-	ms, err := loadMigrations()
-	if err != nil {
-		return err
+		if legacy {
+			if _, err := conn.ExecContext(ctx,
+				`INSERT OR IGNORE INTO schema_migrations (version) VALUES ('001')`); err != nil {
+				return fmt.Errorf("record legacy schema: %w", err)
+			}
+			applied["001"] = true
+		}
 	}
 
 	for _, m := range ms {
 		if applied[m.version] {
 			continue
 		}
-		if err := applyMigration(db, m); err != nil {
+		if err := applyMigration(ctx, conn, m); err != nil {
 			return fmt.Errorf("apply migration %s: %w", m.version, err)
 		}
 	}
+
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("commit migrations: %w", err)
+	}
+	committed = true
 	return nil
 }
 
-// applyMigration runs one migration inside a transaction and records it.
-func applyMigration(db *gorm.DB, m migration) error {
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(m.sql).Error; err != nil {
-			return err
-		}
-		return tx.Exec(`INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)`, m.version).Error
-	})
+// applyMigration runs one migration and records its version. The caller owns the
+// surrounding transaction.
+func applyMigration(ctx context.Context, conn *sql.Conn, m migration) error {
+	if _, err := conn.ExecContext(ctx, m.sql); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx,
+		`INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)`, m.version); err != nil {
+		return fmt.Errorf("record version: %w", err)
+	}
+	return nil
 }
