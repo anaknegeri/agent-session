@@ -90,7 +90,7 @@ func (a *Adapter) writeVSCodeMCP(mcpCommand string) error {
 		"env": map[string]string{
 			"AGENT_SESSION_AGENT": "cline",
 		},
-		"disabled": false,
+		"disabled":    false,
 		"autoApprove": []string{},
 	}
 	config["cline.mcpServers"] = mcpServers
@@ -102,7 +102,7 @@ func (a *Adapter) writeVSCodeMCP(mcpCommand string) error {
 	return os.WriteFile(path, out, 0o644)
 }
 
-func (a *Adapter) Install(ctx context.Context) error  { return nil }
+func (a *Adapter) Install(ctx context.Context) error { return nil }
 func (a *Adapter) Uninstall(ctx context.Context) error {
 	path := filepath.Join(a.projectRoot, ".vscode", "settings.json")
 	data, err := os.ReadFile(path)

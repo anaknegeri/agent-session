@@ -110,7 +110,7 @@ func (a *Adapter) writeRules(cursorDir string) error {
 	return os.WriteFile(path, []byte(rulesContent), 0o644)
 }
 
-func (a *Adapter) Install(ctx context.Context) error  { return nil }
+func (a *Adapter) Install(ctx context.Context) error { return nil }
 func (a *Adapter) Uninstall(ctx context.Context) error {
 	mcpPath := filepath.Join(a.projectRoot, ".cursor", "mcp.json")
 	data, err := os.ReadFile(mcpPath)

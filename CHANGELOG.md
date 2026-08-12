@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   tests over `context.get` at every depth and over `handoff`.
 
 ### Added
+- **Codex session hooks** — `init --only codex` now writes `SessionStart` (resume)
+  and `Stop` (checkpoint) hooks into `$CODEX_HOME/hooks.json` alongside the MCP
+  registration, so a Codex session resumes and checkpoints whether or not the model
+  chooses to call the tools — the reliability Claude Code already had. The schema
+  was taken from an installed Codex plugin's own `hooks/hooks.json`, not guessed.
+  `hooks.json` is shared with plugins, so wiring merges into it, is idempotent, and
+  uninstall removes only agent-session's entries. Codex tracks a `trusted_hash` per
+  hook, so a first run may require trust approval; that path is untested.
 - **P2: checkpoint kinds and retention** — checkpoints record what triggered them
   (`manual`, `auto`, `precompact`, `handoff`) in their own `kind` column instead of
   leaving it implied by a free-text label, and each kind has its own retention

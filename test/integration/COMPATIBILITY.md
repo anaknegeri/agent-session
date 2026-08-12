@@ -12,7 +12,7 @@ breaks.
 | Agent | MCP tools | Context | Checkpoint | Handoff | Hooks | Slash cmds |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
 | Claude Code | ✅ | ✅ | ✅ | 🟡 | ✅ | 🟡 |
-| Codex | ✅ | 🟡 | 🟡 | 🟡 | ⚠ supported by Codex, not wired by us | — |
+| Codex | ✅ | 🟡 | 🟡 | 🟡 | 🟡 wired, end-to-end unverified | — |
 | OpenCode | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via instructions only | 🟡 |
 | Cursor | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via rules only | 🟡 |
 | Cline | 🟡 | 🟡 | 🟡 | ⚠ | ⚠ via rules only | — |
@@ -54,13 +54,15 @@ skipped, which is the intended behaviour of the skip path.
 
 ### Not covered
 
-- **Codex hooks.** Codex 0.147.0 does support hooks — its config carries
-  `[hooks.state]` entries for `session_start`, `stop`, `user_prompt_submit` and
-  `post_tool_use`, and `codex exec` reports them firing. agent-session does not
-  wire any of them: the Codex adapter only runs `codex mcp add`. Wiring
-  `session_start` and `stop` would give Codex the same auto-resume and
-  auto-checkpoint reliability Claude Code has. Untested, and the trust-hash
-  mechanism means an installer has to deal with hook trust.
+- **Codex hooks firing.** `init --only codex` now writes `SessionStart` and `Stop`
+  hooks into `$CODEX_HOME/hooks.json`, using the same schema Codex plugins use
+  (verified against an installed plugin's `hooks/hooks.json`). The file handling is
+  tested: merge, idempotent re-install, and uninstall that removes only our
+  entries. What is **not** verified is a real Codex run firing them. Codex records a
+  `trusted_hash` per hook under `[hooks.state]` and has a
+  `--dangerously-bypass-hook-trust` flag, so a first run may require trust
+  approval. Confirming this needs either the developer's real `~/.codex` (which a
+  test must not modify) or a `CODEX_HOME` holding credentials.
 - **Handoff between two real agents.** Exercised only through the in-process and
   stdio tests, never with two live CLIs.
 - **Cursor and Cline.** Wiring is generated and manually checked; no smoke test.

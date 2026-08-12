@@ -143,7 +143,11 @@ func installCodex(bin string) {
 		red("✗ codex: %v\n", err)
 		return
 	}
-	green("✓ codex: mcp_servers.agent-session registered\n")
+	if err := a.Install(ctx()); err != nil {
+		red("✗ codex hooks: %v\n", err)
+		return
+	}
+	green("✓ codex: mcp_servers.agent-session + hooks (auto resume/checkpoint)\n")
 }
 
 func installCursor(dir, bin string) {
