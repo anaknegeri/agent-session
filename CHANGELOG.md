@@ -12,10 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CI workflow (`ci.yml`) — runs `go test`, `go vet`, `go build` on every push/PR
 - Auto-update Homebrew formula on release (CI builds bottle + pushes to tap)
 - CONTRIBUTING.md
+- **Auto-record file changes** — `context.get` compares git status against recorded events and appends `file.changed` for unrecorded files
+- **Auto-checkpoint when stale** — no checkpoint in 10 min + dirty tree triggers one on `context.get`
+- **Context nudges** — summary warns about stale checkpoints, unrecorded files, and open blockers
+- **`session.record`** — unified tool: event + decision + next_action + checkpoint in one call
+
+### Fixed
+- `git diff HEAD` did not detect untracked files, so `workspace.status`/`workspace.diff` reported `dirty:false` for new files
 
 ### Changed
 - GitHub Actions upgraded to Node.js 24 (checkout@v5, setup-go@v6, upload/download-artifact@v5)
 - Release workflow Go version aligned with go.mod (1.25)
+- MCP server instructions updated for `session.record` and auto-recording
 
 ## [0.1.4] — 2026-08-12
 

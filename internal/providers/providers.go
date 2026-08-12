@@ -37,8 +37,8 @@ func ProvideCheckpointService(store ports.Store, git ports.GitService, logger *s
 	return app.NewCheckpointService(store, git, logger)
 }
 
-func ProvideContextService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget) *app.ContextService {
-	return app.NewContextService(store, checkpoints, renderer, budget)
+func ProvideContextService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget, sync *app.SyncService) *app.ContextService {
+	return app.NewContextService(store, checkpoints, renderer, budget, sync)
 }
 
 func ProvideRenderer() ports.ContextRenderer {
@@ -65,6 +65,10 @@ func ProvideExportService(store ports.Store) *app.ExportService {
 	return app.NewExportService(store)
 }
 
+func ProvideSyncService(store ports.Store, git ports.GitService, artifact *app.ArtifactService, logger *slog.Logger) *app.SyncService {
+	return app.NewSyncService(store, git, artifact, logger)
+}
+
 func ProvideApp(
 	init *app.InitService,
 	session *app.SessionService,
@@ -78,6 +82,7 @@ func ProvideApp(
 	artifact *app.ArtifactService,
 	memory *app.MemoryService,
 	exportSvc *app.ExportService,
+	syncSvc *app.SyncService,
 	store ports.Store,
 ) *app.App {
 	return &app.App{
@@ -93,6 +98,7 @@ func ProvideApp(
 		Artifact:   artifact,
 		Memory:     memory,
 		Export:     exportSvc,
+		Sync:       syncSvc,
 		Store:      store,
 	}
 }

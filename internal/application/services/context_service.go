@@ -22,6 +22,7 @@ type ContextService struct {
 	checkpoints *CheckpointService
 	renderer    ports.ContextRenderer
 	budget      ports.ContextBudget
+	sync        *SyncService
 }
 
 func NewContextService(
@@ -29,14 +30,30 @@ func NewContextService(
 	checkpoints *CheckpointService,
 	renderer ports.ContextRenderer,
 	budget ports.ContextBudget,
+	sync *SyncService,
 ) *ContextService {
-	return &ContextService{store: store, checkpoints: checkpoints, renderer: renderer, budget: budget}
+	return &ContextService{store: store, checkpoints: checkpoints, renderer: renderer, budget: budget, sync: sync}
 }
 
-// Get renders the session context with progressive loading (PRD §25).
-// summary: current task + decisions + blockers + git + recent events + relevant memory,
-// bounded by the context budget to save tokens.
+// Get renders the session context with progressive loading.
+// Auto-syncs file changes and auto-checkpoints when stale before rendering.
 func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (string, error) {
+	// auto-record unrecorded file changes from git
+	if s.sync != nil {
+		if project, perr := s.projectPath(ctx, sessionID); perr == nil {
+			s.sync.SyncFileChanges(ctx, sessionID, project, "sync")
+		}
+	}
+
+	// auto-checkpoint if stale (no checkpoint in 10 min + dirty tree)
+	if s.sync != nil {
+		if project, perr := s.projectPath(ctx, sessionID); perr == nil {
+			if s.sync.IsStale(ctx, sessionID, project) {
+				s.checkpoints.Create(ctx, sessionID, "auto-checkpoint (stale)", "", "sync")
+			}
+		}
+	}
+
 	snapshot, err := s.checkpoints.BuildSnapshot(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -44,11 +61,14 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 
 	renderBudget := s.budget
 	if depth == ContextDepthFull {
-		// explicit full detail: no list truncation, no clamp
 		renderBudget = ports.ContextBudget{}
 	} else if depth == ContextDepthRecent {
-		// bounded lists but never hard-clamped
 		renderBudget.MaxTotalChars = 0
+	}
+
+	// add nudges to snapshot
+	if depth == ContextDepthSummary {
+		s.addNudges(ctx, snapshot)
 	}
 
 	text, err := s.renderer.RenderContext(snapshot, renderBudget)
@@ -96,6 +116,48 @@ func (s *ContextService) injectMemory(ctx context.Context, text string, snapshot
 		text += fmt.Sprintf("- %s\n", truncateString(h.Content, s.budget.MaxItemChars))
 	}
 	return text
+}
+
+// addNudges warns about staleness so the agent knows when to checkpoint or
+// record events. Appended to snapshot.Nudges, rendered by the markdown renderer.
+func (s *ContextService) addNudges(ctx context.Context, snapshot *entities.Snapshot) {
+	if s.sync == nil {
+		return
+	}
+
+	// stale checkpoint warning
+	minutes := s.sync.MinutesSinceCheckpoint(ctx, snapshot.Session.ID)
+	if minutes > 30 {
+		snapshot.Nudges = append(snapshot.Nudges, fmt.Sprintf("⚠ Last checkpoint was %d minutes ago — run session.checkpoint", minutes))
+	}
+
+	// unrecorded file changes
+	if project, err := s.projectPath(ctx, snapshot.Session.ID); err == nil {
+		unrecorded := s.sync.UnrecordedFileCount(ctx, snapshot.Session.ID, project)
+		if unrecorded > 0 {
+			snapshot.Nudges = append(snapshot.Nudges, fmt.Sprintf("⚠ %d changed files not yet recorded — context.get will auto-record them", unrecorded))
+		}
+	}
+
+	// open blockers with no resolution
+	for _, b := range snapshot.Blockers {
+		if b.Status == entities.BlockerStatusOpen {
+			snapshot.Nudges = append(snapshot.Nudges, fmt.Sprintf("⚠ Open blocker: %s", truncateString(b.Description, 60)))
+		}
+	}
+}
+
+// projectPath resolves the project path for a session (needed for git lookups).
+func (s *ContextService) projectPath(ctx context.Context, sessionID string) (string, error) {
+	session, err := s.store.Sessions().GetByID(ctx, sessionID)
+	if err != nil {
+		return "", err
+	}
+	project, err := s.store.Projects().GetByID(ctx, session.ProjectID)
+	if err != nil {
+		return "", err
+	}
+	return project.Path, nil
 }
 
 func eventLimit(max int, depth string) int {

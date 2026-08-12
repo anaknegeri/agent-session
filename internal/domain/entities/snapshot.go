@@ -12,6 +12,7 @@ type Snapshot struct {
 	Blockers   []*Blocker     `json:"blockers"`
 	NextAction string         `json:"next_action"`
 	LastAgent  string         `json:"last_agent"`
+	Nudges     []string       `json:"nudges,omitempty"`
 }
 
 type SessionState struct {

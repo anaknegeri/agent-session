@@ -19,7 +19,7 @@ layer**: agents are interchangeable workers, and the session is the portable sta
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
 - **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline.
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
-- **MCP-native** — 23 tools + 6 resources over stdio or streamable-http.
+- **MCP-native** — 24 tools + 6 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
 - **Checkpoint & handoff** — snapshot the work, hand it to another agent deterministically.
 - **Always available** — agents spawn the stdio MCP server on demand; optional user-scope registration.
@@ -220,11 +220,16 @@ return `project not initialized, run agent-session init` instead of a connection
 
 ### Tools
 
-`session.get`, `session.checkpoint`, `session.diff`, `session.resume`, `context.get`, `context.update`, `context.summarize`,
+`session.get`, `session.checkpoint`, `session.diff`, `session.resume`, `session.record`,
+`context.get`, `context.update`, `context.summarize`,
 `task.create`, `task.get`, `task.update`, `decision.list`, `decision.create`,
 `blocker.create`, `blocker.list`, `blocker.resolve`, `event.append`,
 `workspace.status`, `workspace.diff`,
 `memory.put`, `memory.get`, `memory.search`, `memory.delete`, `memory.promote`
+
+`session.record` is the unified way to log work — it appends an event, records a
+decision, sets `next_action`, and/or creates a checkpoint in a single call.
+
 
 ### Resources
 
@@ -288,6 +293,21 @@ max_total_chars = 4000
 inject_memory  = true
 max_memory     = 3
 ```
+
+## Automatic recording & nudges
+
+Agent Session is designed so agents never have to remember to record state:
+
+- **Auto-record file changes** — `context.get` compares git status against
+  recorded events and appends `file.changed` for anything new, so file edits
+  are captured even if the agent never calls `event.append`.
+- **Auto-checkpoint when stale** — if no checkpoint exists in the last 10
+  minutes and the git tree is dirty, `context.get` creates one automatically.
+- **Context nudges** — the summary view warns about stale checkpoints
+  (>30 min), unrecorded changed files, and open blockers, so the agent knows
+  when to checkpoint.
+- **`session.record`** — record an event, a decision, `next_action`, and/or a
+  checkpoint in one tool call instead of several.
 
 ### Benchmark
 

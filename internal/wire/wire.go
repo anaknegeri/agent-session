@@ -26,6 +26,7 @@ var appSet = wire.NewSet(
 	providers.ProvideArtifactService,
 	providers.ProvideMemoryService,
 	providers.ProvideExportService,
+	providers.ProvideSyncService,
 	providers.ProvideRenderer,
 	providers.ProvideGitService,
 	providers.ProvideApp,

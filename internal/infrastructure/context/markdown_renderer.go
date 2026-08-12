@@ -94,6 +94,13 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 		}
 	}
 
+	if len(snapshot.Nudges) > 0 {
+		b.WriteString("\n## ⚠ Nudges\n")
+		for _, n := range snapshot.Nudges {
+			fmt.Fprintf(&b, "- %s\n", n)
+		}
+	}
+
 	if snapshot.NextAction != "" {
 		b.WriteString("\n## Next action\n")
 		b.WriteString(snapshot.NextAction + "\n")

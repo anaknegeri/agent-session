@@ -84,7 +84,7 @@ func TestFullDepthNeverClamped(t *testing.T) {
 
 	tiny := ports.DefaultContextBudget()
 	tiny.MaxTotalChars = 120
-	cs := app.NewContextService(fx.app.Store, fx.app.Checkpoint, mdc.NewRenderer(), tiny)
+	cs := app.NewContextService(fx.app.Store, fx.app.Checkpoint, mdc.NewRenderer(), tiny, fx.app.Sync)
 
 	summary, err := cs.Get(ctx, initRes.Session.ID, "summary")
 	if err != nil {

@@ -34,6 +34,7 @@ var toolFlags = map[string]toolFlagSpec{
 	"session.diff":       {readOnly: true},
 	"context.get":        {readOnly: true},
 	"context.summarize":  {readOnly: true},
+	"session.record":     {idempotent: true},
 	"task.get":           {readOnly: true},
 	"decision.list":      {readOnly: true},
 	"blocker.list":       {readOnly: true},
@@ -202,6 +203,56 @@ func (s *Server) registerTools() {
 					}
 				}
 				return b.String(), nil
+			},
+		},
+		{
+			name: "session.record",
+			desc: "Record work in one call: append an event, log a decision, set next_action, and optionally checkpoint. Prefer this over several separate calls.",
+			options: []mcp.ToolOption{
+				mcp.WithString("event_type", mcp.Description("Canonical event type to append (e.g. file.changed, test.passed, command.executed)")),
+				mcp.WithString("event_payload", mcp.Description("Optional JSON payload for the event")),
+				mcp.WithString("decision", mcp.Description("Decision to record (with reason)")),
+				mcp.WithString("decision_reason", mcp.Description("Reason behind the decision")),
+				mcp.WithString("next_action", mcp.Description("Next action to store on the checkpoint")),
+				mcp.WithString("checkpoint", mcp.Description("true|false — create a checkpoint after recording (default false)")),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := s.currentSession(ctx)
+				if err != nil {
+					return nil, err
+				}
+				agent := s.agent()
+				results := map[string]any{}
+
+				if et := argString(args, "event_type"); et != "" {
+					if err := s.app.Artifact.AppendEvent(ctx, sessionID, agent, et, argString(args, "event_payload")); err != nil {
+						return nil, err
+					}
+					results["event"] = et
+				}
+
+				if d := argString(args, "decision"); d != "" {
+					dec, err := s.app.Decision.Create(ctx, sessionID, d, argString(args, "decision_reason"), agent)
+					if err != nil {
+						return nil, err
+					}
+					results["decision_id"] = dec.ID
+				}
+
+				if argString(args, "checkpoint") == "true" {
+					nextAction := argString(args, "next_action")
+					cp, err := s.app.Checkpoint.Create(ctx, sessionID, "record", nextAction, agent)
+					if err != nil {
+						return nil, err
+					}
+					results["checkpoint_id"] = cp.ID
+					_, _ = s.app.Context.WriteContextMD(ctx, s.app.Root, sessionID)
+				}
+
+				if len(results) == 0 {
+					return nil, fmt.Errorf("session.record needs at least one of: event_type, decision, checkpoint=true")
+				}
+				return results, nil
 			},
 		},
 		{

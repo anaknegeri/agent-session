@@ -340,3 +340,51 @@ func extractID(t *testing.T, text string) string {
 	t.Helper()
 	return extractIDLike(t, text, "task_")
 }
+
+// TestMCPSessionRecord verifies the unified session.record tool: it can append
+// an event, create a decision, and create a checkpoint in a single call.
+func TestMCPSessionRecord(t *testing.T) {
+	c, app := setupMCP(t)
+
+	res := call(t, c, "session.record", map[string]any{
+		"event_type":      "test.passed",
+		"event_payload":   `{"suite":"unit"}`,
+		"decision":        "Use table-driven tests",
+		"decision_reason": "Cleaner assertions",
+		"next_action":     "Add more cases",
+		"checkpoint":      "true",
+	})
+	if !strings.Contains(res, "decision_") || !strings.Contains(res, "chk_") {
+		t.Fatalf("session.record output missing decision/checkpoint ids: %s", res)
+	}
+
+	session, err := app.Session.Get(ctxBackground(), appSessionID(app))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, _ := app.Event.List(ctxBackground(), session.ID, 50)
+	hasTestPassed := false
+	for _, e := range events {
+		if e.Type == "test.passed" {
+			hasTestPassed = true
+			break
+		}
+	}
+	if !hasTestPassed {
+		t.Fatal("expected test.passed event recorded by session.record")
+	}
+}
+
+func ctxBackground() context.Context { return context.Background() }
+
+func appSessionID(app *bootstrap.App) string {
+	projectID, err := app.ResolveProjectID(ctxBackground(), app.Root)
+	if err != nil {
+		return ""
+	}
+	s, err := app.Session.GetActive(ctxBackground(), projectID)
+	if err != nil {
+		return ""
+	}
+	return s.ID
+}

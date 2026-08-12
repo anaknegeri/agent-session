@@ -20,6 +20,7 @@ type App struct {
 	Artifact   *ArtifactService
 	Memory     *MemoryService
 	Export     *ExportService
+	Sync       *SyncService
 	Store      ports.Store
 }
 

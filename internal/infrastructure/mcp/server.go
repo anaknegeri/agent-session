@@ -36,13 +36,18 @@ This project uses Agent Session to keep work context across sessions and agents.
    - context.get - load the current context (start with depth=summary, use depth=full when you need complete decisions, blockers, changed files, or the full event list)
    Continue the existing task; do not start from scratch.
 
-2. Record work as you go:
-   - task.create / task.update - track the current task
-   - decision.create - record architectural decisions with a reason
-   - blocker.create - record blockers
-   - event.append - record test results (test.failed / test.passed) and file.changed
+2. Record work with ONE call when possible — session.record handles events,
+   decisions, next_action, and checkpoints together:
+   - session.record event_type=test.passed - record test results
+   - session.record decision="..." decision_reason="..." - record a decision
+   - session.record checkpoint=true next_action="..." - checkpoint before finishing
+   File changes are auto-recorded by context.get — no need to append file.changed manually.
 
-3. Before finishing (Stop / session end), create a checkpoint:
+3. Track the current task:
+   - task.create / task.update - create or update the task
+   - blocker.create - record blockers that block progress
+
+4. Before finishing (Stop / session end), checkpoint:
    - session.checkpoint - include the next_action so the next agent can continue.`
 
 type Server struct {

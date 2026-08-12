@@ -66,6 +66,18 @@ func (r *runner) DiffStat(ctx context.Context, dir string) ([]ports.FileChange, 
 		}
 		changes = append(changes, ports.FileChange{Path: parts[1], Status: parts[0]})
 	}
+
+	// `git diff HEAD` does not list untracked files; append them from
+	// `git status --porcelain` so a fresh file is not reported as clean.
+	untracked, _ := r.run(ctx, dir, "status", "--porcelain")
+	for _, line := range strings.Split(untracked, "\n") {
+		line = strings.TrimSpace(line)
+		if len(line) < 4 || line[:2] != "??" {
+			continue
+		}
+		changes = append(changes, ports.FileChange{Path: strings.TrimSpace(line[2:]), Status: "??"})
+	}
+
 	return changes, nil
 }
 

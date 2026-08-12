@@ -27,15 +27,16 @@ func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextB
 	workspaceService := providers.ProvideWorkspaceService(gitService)
 	checkpointService := providers.ProvideCheckpointService(store, gitService, logger)
 	contextRenderer := providers.ProvideRenderer()
-	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer, budget)
-	handoffService := providers.ProvideHandoffService(store, checkpointService, contextRenderer, budget, logger)
 	artifactService := providers.ProvideArtifactService(store)
+	syncService := providers.ProvideSyncService(store, gitService, artifactService, logger)
+	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer, budget, syncService)
+	handoffService := providers.ProvideHandoffService(store, checkpointService, contextRenderer, budget, logger)
 	memoryService := providers.ProvideMemoryService(store, logger)
 	exportService := providers.ProvideExportService(store)
-	app := providers.ProvideApp(initService, sessionService, taskService, decisionService, eventService, workspaceService, checkpointService, contextService, handoffService, artifactService, memoryService, exportService, store)
+	app := providers.ProvideApp(initService, sessionService, taskService, decisionService, eventService, workspaceService, checkpointService, contextService, handoffService, artifactService, memoryService, exportService, syncService, store)
 	return app, nil
 }
 
 // wire.go:
 
-var appSet = wire.NewSet(providers.ProvideInitService, providers.ProvideSessionService, providers.ProvideTaskService, providers.ProvideDecisionService, providers.ProvideEventService, providers.ProvideWorkspaceService, providers.ProvideCheckpointService, providers.ProvideContextService, providers.ProvideHandoffService, providers.ProvideArtifactService, providers.ProvideMemoryService, providers.ProvideExportService, providers.ProvideRenderer, providers.ProvideGitService, providers.ProvideApp)
+var appSet = wire.NewSet(providers.ProvideInitService, providers.ProvideSessionService, providers.ProvideTaskService, providers.ProvideDecisionService, providers.ProvideEventService, providers.ProvideWorkspaceService, providers.ProvideCheckpointService, providers.ProvideContextService, providers.ProvideHandoffService, providers.ProvideArtifactService, providers.ProvideMemoryService, providers.ProvideExportService, providers.ProvideSyncService, providers.ProvideRenderer, providers.ProvideGitService, providers.ProvideApp)
