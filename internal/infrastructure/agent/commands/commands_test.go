@@ -67,14 +67,22 @@ func TestInstallAndUninstall(t *testing.T) {
 func TestRender(t *testing.T) {
 	for _, c := range All() {
 		out := c.Render()
+		// frontmatter must be the first thing (opencode/cursor parse it)
+		if !strings.HasPrefix(out, "---\ndescription:") {
+			t.Fatalf("%s must start with frontmatter, got: %q", c.FileName(), out[:min(len(out), 40)])
+		}
 		if !strings.Contains(out, "<!-- agent-session:managed -->") {
 			t.Fatalf("%s missing managed marker", c.FileName())
-		}
-		if !strings.HasPrefix(out, "<!-- agent-session:managed -->\n---\ndescription:") {
-			t.Fatalf("%s malformed frontmatter", c.FileName())
 		}
 		if !strings.Contains(out, "Agent Session") {
 			t.Fatalf("%s missing Agent Session mention", c.FileName())
 		}
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

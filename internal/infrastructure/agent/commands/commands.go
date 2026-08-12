@@ -79,13 +79,15 @@ func (c Command) FileName() string {
 	return c.Name + ".md"
 }
 
-// Render produces the markdown content for a command file.
+// Render produces the markdown content for a command file. The managed marker
+// is placed after the frontmatter so parsers (opencode, cursor) that require
+// `---` as the first line still work.
 func (c Command) Render() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<!-- agent-session:managed -->\n")
 	fmt.Fprintf(&b, "---\n")
 	fmt.Fprintf(&b, "description: %s\n", c.Description)
-	fmt.Fprintf(&b, "---\n\n")
+	fmt.Fprintf(&b, "---\n")
+	fmt.Fprintf(&b, "<!-- agent-session:managed -->\n\n")
 	b.WriteString(strings.TrimSpace(c.Prompt))
 	b.WriteString("\n")
 	return b.String()
