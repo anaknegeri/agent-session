@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Real MCP-over-stdio integration test** — full agent workflow (session.get → context.get → task.create → session.record → checkpoint → context) over a real stdio subprocess, exactly how agents connect
+- **Real-agent smoke tests** — `TestClaudeCodeSmoke`, `TestCodexSmoke`, `TestOpenCodeSmoke` gated behind `AGENT_SESSION_SMOKE=1` (skip gracefully when the agent CLI is absent)
+- **Agent compatibility matrix** — `test/integration/COMPATIBILITY.md` documenting per-agent capability status
 - **Slash commands** — `/agent-session`, `/agent-session-checkpoint`, `/agent-session-record` installed at user scope for Claude Code, OpenCode, and Cursor (`plugin uninstall <agent> --scope user` removes them)
 - **Versioned SQLite migrations** — `schema_migrations` table + `migrations/*.sql` steps, applied transactionally and idempotently. Legacy databases created by the old single-file schema are auto-detected and marked migrated without data loss.
 - **P1 hardening: session lifecycle** — resume/complete/start now close all open agent sessions (`ended_at` set); `Resume` is atomic (single transaction) so concurrent processes never leave more than one active agent session.

@@ -437,7 +437,11 @@ Layout: clean architecture (`Domain → Application → Infrastructure`) with Wi
 See `ARCHITECTURE.md` for the full schema, MCP design and development order.
 
 Testing: SQLite `:memory:` unit tests, real-git integration fixtures, in-process
-MCP client tests, and a live end-to-end flow (`init → task → checkpoint → handoff → resume`).
+MCP client tests, real MCP-over-stdio integration tests, and a live end-to-end
+flow (`init → task → checkpoint → handoff → resume`). Real-agent smoke tests
+(Claude Code / Codex / OpenCode) run with `AGENT_SESSION_SMOKE=1` where the
+agent CLIs are installed. See `test/integration/COMPATIBILITY.md` for the
+agent capability matrix.
 
 ---
 
