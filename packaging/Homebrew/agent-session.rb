@@ -5,44 +5,44 @@ class AgentSession < Formula
   desc "Universal session & handoff layer for AI coding agents"
   homepage "https://agent-session.dev"
   license "MIT"
-  version "0.1.3"
+  version "0.1.4"
   bottle do
-    root_url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3"
-    sha256 cellar: :any_skip_relocation, arm64_golden_gate: "0cb6514cadb905845ea08c558f9ddd4a9a71f11ec1b3519e31a8bb4e230a5e70"
+    root_url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4"
+    sha256 cellar: :any_skip_relocation, arm64_golden_gate: "96b09c148dbd074a4051790dc07fe359f6e0dfa87a9bffa2e251df89ff542d2d"
   end
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-darwin-arm64"
-      sha256 "33785fb4ae099c0e9ac10f0f5df7e4be926f0283a25caba12ab44e8f8015e1de"
+      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-darwin-arm64"
+      sha256 "23fdd90b7ebd69b900c0357f6d4c2bd433dd40c56ffbbcf95d2754c6ea70b175"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-mcp-darwin-arm64"
-        sha256 "b89ceaaee0b70841753cf2c0c0b4f787d6bb18db3c42a93d169a23a909cdc500"
+        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-mcp-darwin-arm64"
+        sha256 "85d2be87422925edfd56e06afafb19e1b0e82800128b318dec8aeb43a61407b6"
       end
     else
-      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-darwin-amd64"
-      sha256 "d1f799fcae0925f9dfdc91b59b03def21252c57e3d02e515299299ad94e5c3e8"
+      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-darwin-amd64"
+      sha256 "fbb13053250afafcae74ad14f4c229bb8702f4b23323131a8df6b7afaef62e4e"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-mcp-darwin-amd64"
-        sha256 "2232588029ff30e26a50f5263b4994818294cee630a338636eb11a8e349ef001"
+        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-mcp-darwin-amd64"
+        sha256 "5f400a700566c9b614e2521f74ab930593708ae92c4e2d95c36e3eed545a56c8"
       end
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-linux-arm64"
-      sha256 "4b3f0ea921f003e105df96d2e1a3f26b186a68d231acb0dd9824efd62c6cfed8"
+      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-linux-arm64"
+      sha256 "c89f3bfe576636b67aa200001baea0ef18bd69480c45fe8330c8ec35f2186f2c"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-mcp-linux-arm64"
-        sha256 "ea58201695fda1d0077ba11dbcc930181504afddc05b0dfd44e4cf5996575090"
+        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-mcp-linux-arm64"
+        sha256 "29ead1d71b2921510379c1d0ca41e7e92c4813ec70221b4a8f5aab11ee2b58a9"
       end
     else
-      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-linux-amd64"
-      sha256 "9101ccbc420c8c4bc9d7c5cc57030ce30850b9186cb79e88615e158e5d280fbf"
+      url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-linux-amd64"
+      sha256 "c727e748c24448869ffaaf795e2a231c4e4c49d54f497ebe949f001da6138c92"
       resource "mcp" do
-        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.3/agent-session-mcp-linux-amd64"
-        sha256 "94bcda65fed9dedcf0ac5c229aee7b6afa189e079a85f6de6b5f45f69c0cfcd0"
+        url "https://github.com/anaknegeri/agent-session/releases/download/v0.1.4/agent-session-mcp-linux-amd64"
+        sha256 "4f51cfd78a39f3dfc18795d2b292937769612d3c54731f2570c5778827ecb253"
       end
     end
   end
