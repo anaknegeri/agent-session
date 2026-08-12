@@ -10,13 +10,21 @@ import (
 )
 
 // guardedHookCommands maps Claude Code hook events to shell commands that
-// only act inside an agent-session project ([ -d .agent ]) and never fail
-// the hook (|| true), so they are silent no-ops in every other project.
+// only act inside an agent-session project and never fail the hook (|| true),
+// so they are silent no-ops in every other project.
+//
+// agent-session has no --dir flag — it resolves the project root from the
+// process's own working directory (os.Getwd()), which a hook subprocess is
+// not guaranteed to inherit. Anchoring on $CLAUDE_PROJECT_DIR (the project
+// root Claude Code was started in, always set for hook subprocesses) makes
+// both the .agent existence check and the command itself independent of
+// whatever cwd the hook actually runs with.
 func guardedHookCommands() map[string]string {
+	const cdProject = `cd "$CLAUDE_PROJECT_DIR" 2>/dev/null && `
 	return map[string]string{
-		"SessionStart": "[ -d .agent ] && agent-session resume --agent claude || true",
-		"Stop":         "[ -d .agent ] && agent-session checkpoint --label auto || true",
-		"PreCompact":   "[ -d .agent ] && agent-session checkpoint --label precompact || true",
+		"SessionStart": cdProject + "[ -d .agent ] && agent-session resume --agent claude || true",
+		"Stop":         cdProject + "[ -d .agent ] && agent-session checkpoint --label auto || true",
+		"PreCompact":   cdProject + "[ -d .agent ] && agent-session checkpoint --label precompact || true",
 	}
 }
 

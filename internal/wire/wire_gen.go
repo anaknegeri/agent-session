@@ -29,7 +29,7 @@ func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextB
 	contextRenderer := providers.ProvideRenderer()
 	artifactService := providers.ProvideArtifactService(store)
 	syncService := providers.ProvideSyncService(store, gitService, artifactService, logger)
-	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer, budget, syncService)
+	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer, budget, syncService, gitService)
 	handoffService := providers.ProvideHandoffService(store, checkpointService, contextRenderer, budget, logger)
 	memoryService := providers.ProvideMemoryService(store, logger)
 	exportService := providers.ProvideExportService(store)

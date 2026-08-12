@@ -16,6 +16,9 @@ const StaleThreshold = 10
 
 // SyncService auto-records detectable changes (file modifications via git) so
 // agents don't have to manually call event.append for every file they edit.
+// It never fetches git status itself — callers fetch it once per request and
+// pass it in, since a single context.get would otherwise shell out to git
+// once per method here.
 type SyncService struct {
 	store    ports.Store
 	git      ports.GitService
@@ -29,47 +32,10 @@ func NewSyncService(store ports.Store, git ports.GitService, artifact *ArtifactS
 
 // SyncFileChanges detects files modified since the last recorded file.changed
 // event and auto-appends events for any that haven't been recorded yet.
-func (s *SyncService) SyncFileChanges(ctx context.Context, sessionID, projectPath, agent string) (int, error) {
-	status, err := s.git.Status(ctx, projectPath)
-	if err != nil || len(status.Changes) == 0 {
-		return 0, nil
-	}
-
-	currentFiles := make(map[string]bool, len(status.Changes))
-	for _, c := range status.Changes {
-		currentFiles[c.Path] = true
-	}
-
-	recentEvents, err := s.store.Events().ListBySession(ctx, sessionID, 100)
-	if err != nil {
+func (s *SyncService) SyncFileChanges(ctx context.Context, sessionID, agent string, status ports.WorkspaceStatus) (int, error) {
+	files, err := s.unrecordedFiles(ctx, sessionID, status)
+	if err != nil || len(files) == 0 {
 		return 0, err
-	}
-	for _, e := range recentEvents {
-		if e.Type != entities.EventFileChanged {
-			continue
-		}
-		var payload struct {
-			Files []string `json:"files"`
-			Path  string   `json:"path"`
-		}
-		if e.Payload != "" {
-			json.Unmarshal([]byte(e.Payload), &payload)
-		}
-		if payload.Path != "" {
-			delete(currentFiles, payload.Path)
-		}
-		for _, f := range payload.Files {
-			delete(currentFiles, f)
-		}
-	}
-
-	if len(currentFiles) == 0 {
-		return 0, nil
-	}
-
-	files := make([]string, 0, len(currentFiles))
-	for f := range currentFiles {
-		files = append(files, f)
 	}
 
 	payload, _ := json.Marshal(map[string]any{"files": files})
@@ -96,14 +62,11 @@ func (s *SyncService) MinutesSinceCheckpoint(ctx context.Context, sessionID stri
 	return int(time.Since(cp.CreatedAt.Time.UTC()).Minutes())
 }
 
-// IsStale reports whether the session should be auto-checkpointed.
-func (s *SyncService) IsStale(ctx context.Context, sessionID, projectPath string) bool {
+// IsStale reports whether the session should be auto-checkpointed: no
+// checkpoint in StaleThreshold minutes and the working tree is dirty.
+func (s *SyncService) IsStale(ctx context.Context, sessionID string, status ports.WorkspaceStatus) bool {
 	minutes := s.MinutesSinceCheckpoint(ctx, sessionID)
 	if minutes >= 0 && minutes < StaleThreshold {
-		return false
-	}
-	status, err := s.git.Status(ctx, projectPath)
-	if err != nil {
 		return false
 	}
 	return status.Dirty
@@ -111,18 +74,30 @@ func (s *SyncService) IsStale(ctx context.Context, sessionID, projectPath string
 
 // UnrecordedFileCount returns the number of git-modified files that haven't
 // been recorded as file.changed events yet.
-func (s *SyncService) UnrecordedFileCount(ctx context.Context, sessionID, projectPath string) int {
-	status, err := s.git.Status(ctx, projectPath)
-	if err != nil || len(status.Changes) == 0 {
+func (s *SyncService) UnrecordedFileCount(ctx context.Context, sessionID string, status ports.WorkspaceStatus) int {
+	files, err := s.unrecordedFiles(ctx, sessionID, status)
+	if err != nil {
 		return 0
 	}
+	return len(files)
+}
 
+// unrecordedFiles diffs status against already-recorded file.changed events,
+// returning the files that still need recording. Shared by SyncFileChanges
+// and UnrecordedFileCount so the diffing logic exists in exactly one place.
+func (s *SyncService) unrecordedFiles(ctx context.Context, sessionID string, status ports.WorkspaceStatus) ([]string, error) {
+	if len(status.Changes) == 0 {
+		return nil, nil
+	}
 	currentFiles := make(map[string]bool, len(status.Changes))
 	for _, c := range status.Changes {
 		currentFiles[c.Path] = true
 	}
 
-	recentEvents, _ := s.store.Events().ListBySession(ctx, sessionID, 100)
+	recentEvents, err := s.store.Events().ListBySession(ctx, sessionID, 100)
+	if err != nil {
+		return nil, err
+	}
 	for _, e := range recentEvents {
 		if e.Type != entities.EventFileChanged {
 			continue
@@ -131,8 +106,10 @@ func (s *SyncService) UnrecordedFileCount(ctx context.Context, sessionID, projec
 			Files []string `json:"files"`
 			Path  string   `json:"path"`
 		}
+		// best-effort: payload isn't guaranteed to be valid/shaped JSON, so a
+		// parse failure just means this event doesn't clear any files below.
 		if e.Payload != "" {
-			json.Unmarshal([]byte(e.Payload), &payload)
+			_ = json.Unmarshal([]byte(e.Payload), &payload)
 		}
 		if payload.Path != "" {
 			delete(currentFiles, payload.Path)
@@ -141,5 +118,13 @@ func (s *SyncService) UnrecordedFileCount(ctx context.Context, sessionID, projec
 			delete(currentFiles, f)
 		}
 	}
-	return len(currentFiles)
+	if len(currentFiles) == 0 {
+		return nil, nil
+	}
+
+	files := make([]string, 0, len(currentFiles))
+	for f := range currentFiles {
+		files = append(files, f)
+	}
+	return files, nil
 }

@@ -32,7 +32,7 @@ type toolFlagSpec struct {
 var toolFlags = map[string]toolFlagSpec{
 	"session.get":        {readOnly: true},
 	"session.diff":       {readOnly: true},
-	"context.get":        {readOnly: true},
+	"context.get":        {idempotent: true}, // auto-syncs file changes and may auto-checkpoint — not read-only
 	"context.summarize":  {readOnly: true},
 	"session.record":     {idempotent: true},
 	"task.get":           {readOnly: true},
@@ -214,7 +214,7 @@ func (s *Server) registerTools() {
 				mcp.WithString("decision", mcp.Description("Decision to record (with reason)")),
 				mcp.WithString("decision_reason", mcp.Description("Reason behind the decision")),
 				mcp.WithString("next_action", mcp.Description("Next action to store on the checkpoint")),
-				mcp.WithString("checkpoint", mcp.Description("true|false — create a checkpoint after recording (default false)")),
+				mcp.WithBoolean("checkpoint", mcp.Description("Create a checkpoint after recording (default false)")),
 			},
 			run: func(ctx context.Context, args map[string]any) (any, error) {
 				sessionID, err := s.currentSession(ctx)
@@ -239,7 +239,7 @@ func (s *Server) registerTools() {
 					results["decision_id"] = dec.ID
 				}
 
-				if argString(args, "checkpoint") == "true" {
+				if argBool(args, "checkpoint") {
 					nextAction := argString(args, "next_action")
 					cp, err := s.app.Checkpoint.Create(ctx, sessionID, "record", nextAction, agent)
 					if err != nil {

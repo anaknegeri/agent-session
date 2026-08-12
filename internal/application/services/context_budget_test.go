@@ -9,6 +9,7 @@ import (
 	app "github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	mdc "github.com/anaknegeri/agent-session/internal/infrastructure/context"
+	gitrunner "github.com/anaknegeri/agent-session/internal/infrastructure/git"
 )
 
 // smallBudget mimics a tight config to exercise truncation.
@@ -84,7 +85,7 @@ func TestFullDepthNeverClamped(t *testing.T) {
 
 	tiny := ports.DefaultContextBudget()
 	tiny.MaxTotalChars = 120
-	cs := app.NewContextService(fx.app.Store, fx.app.Checkpoint, mdc.NewRenderer(), tiny, fx.app.Sync)
+	cs := app.NewContextService(fx.app.Store, fx.app.Checkpoint, mdc.NewRenderer(), tiny, fx.app.Sync, gitrunner.NewRunner())
 
 	summary, err := cs.Get(ctx, initRes.Session.ID, "summary")
 	if err != nil {

@@ -23,6 +23,7 @@ type ContextService struct {
 	renderer    ports.ContextRenderer
 	budget      ports.ContextBudget
 	sync        *SyncService
+	git         ports.GitService
 }
 
 func NewContextService(
@@ -31,26 +32,21 @@ func NewContextService(
 	renderer ports.ContextRenderer,
 	budget ports.ContextBudget,
 	sync *SyncService,
+	git ports.GitService,
 ) *ContextService {
-	return &ContextService{store: store, checkpoints: checkpoints, renderer: renderer, budget: budget, sync: sync}
+	return &ContextService{store: store, checkpoints: checkpoints, renderer: renderer, budget: budget, sync: sync, git: git}
 }
 
 // Get renders the session context with progressive loading.
 // Auto-syncs file changes and auto-checkpoints when stale before rendering.
 func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (string, error) {
-	// auto-record unrecorded file changes from git
-	if s.sync != nil {
-		if project, perr := s.projectPath(ctx, sessionID); perr == nil {
-			s.sync.SyncFileChanges(ctx, sessionID, project, "sync")
-		}
-	}
-
-	// auto-checkpoint if stale (no checkpoint in 10 min + dirty tree)
-	if s.sync != nil {
-		if project, perr := s.projectPath(ctx, sessionID); perr == nil {
-			if s.sync.IsStale(ctx, sessionID, project) {
-				s.checkpoints.Create(ctx, sessionID, "auto-checkpoint (stale)", "", "sync")
-			}
+	// Fetch git status once and thread it through sync/staleness/nudges below —
+	// each used to shell out to git separately, tripling the cost of every call.
+	status, haveStatus := s.gitStatus(ctx, sessionID)
+	if haveStatus && s.sync != nil {
+		s.sync.SyncFileChanges(ctx, sessionID, "sync", status)
+		if s.sync.IsStale(ctx, sessionID, status) {
+			s.checkpoints.Create(ctx, sessionID, "auto-checkpoint (stale)", "", "sync")
 		}
 	}
 
@@ -68,7 +64,7 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 
 	// add nudges to snapshot
 	if depth == ContextDepthSummary {
-		s.addNudges(ctx, snapshot)
+		s.addNudges(ctx, snapshot, status, haveStatus)
 	}
 
 	text, err := s.renderer.RenderContext(snapshot, renderBudget)
@@ -120,7 +116,7 @@ func (s *ContextService) injectMemory(ctx context.Context, text string, snapshot
 
 // addNudges warns about staleness so the agent knows when to checkpoint or
 // record events. Appended to snapshot.Nudges, rendered by the markdown renderer.
-func (s *ContextService) addNudges(ctx context.Context, snapshot *entities.Snapshot) {
+func (s *ContextService) addNudges(ctx context.Context, snapshot *entities.Snapshot, status ports.WorkspaceStatus, haveStatus bool) {
 	if s.sync == nil {
 		return
 	}
@@ -132,9 +128,8 @@ func (s *ContextService) addNudges(ctx context.Context, snapshot *entities.Snaps
 	}
 
 	// unrecorded file changes
-	if project, err := s.projectPath(ctx, snapshot.Session.ID); err == nil {
-		unrecorded := s.sync.UnrecordedFileCount(ctx, snapshot.Session.ID, project)
-		if unrecorded > 0 {
+	if haveStatus {
+		if unrecorded := s.sync.UnrecordedFileCount(ctx, snapshot.Session.ID, status); unrecorded > 0 {
 			snapshot.Nudges = append(snapshot.Nudges, fmt.Sprintf("⚠ %d changed files not yet recorded — context.get will auto-record them", unrecorded))
 		}
 	}
@@ -158,6 +153,24 @@ func (s *ContextService) projectPath(ctx context.Context, sessionID string) (str
 		return "", err
 	}
 	return project.Path, nil
+}
+
+// gitStatus fetches workspace status once per Get() call. haveStatus is false
+// when git is unavailable or the project path can't be resolved, in which
+// case callers skip sync/staleness/nudge logic entirely rather than guessing.
+func (s *ContextService) gitStatus(ctx context.Context, sessionID string) (ports.WorkspaceStatus, bool) {
+	if s.git == nil {
+		return ports.WorkspaceStatus{}, false
+	}
+	project, err := s.projectPath(ctx, sessionID)
+	if err != nil {
+		return ports.WorkspaceStatus{}, false
+	}
+	status, err := s.git.Status(ctx, project)
+	if err != nil {
+		return ports.WorkspaceStatus{}, false
+	}
+	return status, true
 }
 
 func eventLimit(max int, depth string) int {

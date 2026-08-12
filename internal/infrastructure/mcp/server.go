@@ -178,6 +178,25 @@ func argString(args map[string]any, key string) string {
 	}
 }
 
+func argBool(args map[string]any, key string) bool {
+	v, ok := args[key]
+	if !ok {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return t == "true"
+	case json.RawMessage:
+		var b bool
+		if json.Unmarshal(t, &b) == nil {
+			return b
+		}
+	}
+	return false
+}
+
 func intArg(args map[string]any, key string) int {
 	v, ok := args[key]
 	if !ok {

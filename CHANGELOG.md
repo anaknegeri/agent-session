@@ -19,11 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - `git diff HEAD` did not detect untracked files, so `workspace.status`/`workspace.diff` reported `dirty:false` for new files
+- `context.get` was declared `readOnlyHint` while silently auto-checkpointing and auto-recording file changes — now declared `idempotentHint` to match actual behavior
+- `context.get` called `git status` up to 3x per request (auto-record, staleness check, and nudges each fetched it independently) — now fetched once and shared, cutting git subprocess spawns per call by ~35%
+- `session.record`'s `checkpoint` parameter used a string `"true"/"false"` instead of a JSON boolean
+- Claude Code hooks (`SessionStart`/`Stop`/`PreCompact`) now anchor on `$CLAUDE_PROJECT_DIR` before checking `.agent`/running commands — the CLI resolves its project root from the process's own working directory, which a hook subprocess isn't guaranteed to inherit
 
 ### Changed
 - GitHub Actions upgraded to Node.js 24 (checkout@v5, setup-go@v6, upload/download-artifact@v5)
 - Release workflow Go version aligned with go.mod (1.25)
 - MCP server instructions updated for `session.record` and auto-recording
+- `SyncFileChanges`/`UnrecordedFileCount` duplicate file-diffing logic extracted into a shared helper
 
 ## [0.1.4] — 2026-08-12
 
