@@ -64,6 +64,31 @@ func GlobalRulePath(home string) string {
 	return filepath.Join(home, ".claude", "CLAUDE.md")
 }
 
+// UserConfigPath is where Claude Code keeps its user-scope MCP registrations —
+// a different file from settings.json, and the one `claude mcp add --scope user`
+// writes.
+func UserConfigPath(home string) string { return filepath.Join(home, ".claude.json") }
+
+// UserMCPCommand returns the command Claude Code has registered for the
+// agent-session MCP server at user scope, or "" when there is none.
+//
+// `claude mcp add` refuses to touch an entry that already exists, so setup needs
+// to know the registered path to notice a stale one: after the binary moves — a
+// self-update, a switch from Homebrew to ~/.local/bin — an unchanged entry points
+// at a file that is gone, and Claude Code loses every session tool with no error
+// anywhere. Every other adapter rewrites `command` on re-run; this makes the
+// Claude path able to do the same.
+func UserMCPCommand(home string) (string, error) {
+	config, err := agent.ReadJSONConfig(UserConfigPath(home))
+	if err != nil {
+		return "", err
+	}
+	servers, _ := config["mcpServers"].(map[string]any)
+	entry, _ := servers["agent-session"].(map[string]any)
+	command, _ := entry["command"].(string)
+	return command, nil
+}
+
 // EnsureGlobalHooks merges the guarded hooks into ~/.claude/settings.json.
 func EnsureGlobalHooks(home string) error { return EnsureHooks(GlobalSettingsPath(home)) }
 

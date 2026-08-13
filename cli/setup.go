@@ -67,13 +67,28 @@ func uninstallCommands(agentName string) error {
 // (AGENTS.md alone is never read by Claude Code) so state loads and
 // checkpoints automatically in every agent-session project on this machine.
 func installClaudeGlobal(bin string) error {
-	cmd := exec.Command("claude", "mcp", "add", "--scope", "user", "agent-session", "--", bin, "mcp")
-	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "already exists") {
-		return fmt.Errorf("claude mcp add (user scope): %v: %s", err, strings.TrimSpace(string(out)))
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("home dir: %w", err)
+	}
+	// `claude mcp add` leaves an existing entry alone, so a registration made
+	// before the binary moved would keep pointing at a path that no longer exists
+	// — and Claude Code reports nothing, it just has no session tools. Drop the
+	// stale entry first so the add below rewrites it, the way every other adapter
+	// rewrites `command` on re-run.
+	registered, err := claude.UserMCPCommand(home)
+	if err != nil {
+		return err
+	}
+	if registered != "" && registered != bin {
+		remove := exec.Command("claude", "mcp", "remove", "--scope", "user", "agent-session")
+		if out, rmErr := remove.CombinedOutput(); rmErr != nil {
+			return fmt.Errorf("claude mcp remove (stale %s): %v: %s", registered, rmErr, strings.TrimSpace(string(out)))
+		}
+	}
+	cmd := exec.Command("claude", "mcp", "add", "--scope", "user", "agent-session", "--", bin, "mcp")
+	if out, err := cmd.CombinedOutput(); err != nil && !strings.Contains(string(out), "already exists") {
+		return fmt.Errorf("claude mcp add (user scope): %v: %s", err, strings.TrimSpace(string(out)))
 	}
 	if err := claude.EnsureGlobalHooks(home); err != nil {
 		return fmt.Errorf("claude hooks: %w", err)

@@ -164,6 +164,43 @@ func TestConfigureRefusesUnparseableMCP(t *testing.T) {
 	}
 }
 
+// TestUserMCPCommandReadsTheRegisteredPath covers what makes a stale registration
+// noticeable. `claude mcp add` leaves an existing entry alone, so setup has to read
+// the registered command to see that it points at a binary that moved — the state a
+// self-update or a Homebrew→~/.local/bin switch leaves behind, which Claude Code
+// reports as no session tools and no error.
+func TestUserMCPCommandReadsTheRegisteredPath(t *testing.T) {
+	home := t.TempDir()
+
+	// No file yet: not an error, there is simply nothing registered.
+	if command, err := UserMCPCommand(home); err != nil || command != "" {
+		t.Errorf("UserMCPCommand on a fresh home = %q, %v; want \"\", nil", command, err)
+	}
+
+	writeFile(t, UserConfigPath(home), `{"mcpServers":{"other":{"command":"x"}}}`)
+	if command, err := UserMCPCommand(home); err != nil || command != "" {
+		t.Errorf("UserMCPCommand with only a foreign server = %q, %v; want \"\", nil", command, err)
+	}
+
+	writeFile(t, UserConfigPath(home),
+		`{"mcpServers":{"agent-session":{"command":"/opt/homebrew/bin/agent-session","args":["mcp"]}}}`)
+	command, err := UserMCPCommand(home)
+	if err != nil {
+		t.Fatalf("UserMCPCommand: %v", err)
+	}
+	if command != "/opt/homebrew/bin/agent-session" {
+		t.Errorf("UserMCPCommand = %q, want the registered path", command)
+	}
+
+	// ~/.claude.json holds the user's own MCP servers and project history, so a
+	// parse failure has to be reported rather than read as "nothing registered":
+	// setup would otherwise re-add on top of a file it could not understand.
+	writeFile(t, UserConfigPath(home), `{"mcpServers":{"agent-session":{},}}`)
+	if _, err := UserMCPCommand(home); err == nil {
+		t.Error("UserMCPCommand read an unparseable ~/.claude.json as no registration")
+	}
+}
+
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

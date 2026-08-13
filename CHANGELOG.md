@@ -5,6 +5,18 @@ All notable changes to Agent Session are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **Re-running setup left Claude Code pointing at a binary that moved.**
+  `claude mcp add` leaves an existing entry alone, and the "already exists" error was
+  swallowed, so after a self-update or a switch from Homebrew to `~/.local/bin` the
+  user-scope registration kept the old path — and Claude Code reports that as no
+  agent-session tools at all, with no error anywhere. `init`/`plugin install claude`
+  now reads the registered command and re-registers when it differs, the way every
+  other adapter rewrites `command` on re-run, and `doctor` fails when the registered
+  path is not there instead of only checking that an entry exists.
+
 ## [0.1.7] — 2026-08-13
 
 ### Added

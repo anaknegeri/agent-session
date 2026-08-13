@@ -163,18 +163,18 @@ func claudeUserScopeWired(home string) (bool, string) {
 }
 
 func claudeUserMCPRegistered(home string) (bool, string) {
-	path := filepath.Join(home, ".claude.json")
-	data, err := os.ReadFile(path)
+	command, err := claude.UserMCPCommand(home)
 	if err != nil {
-		return false, "missing ~/.claude.json — no user-scope MCP server"
+		return false, fmt.Sprintf("%v", err)
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return false, "invalid ~/.claude.json"
+	if command == "" {
+		return false, fmt.Sprintf("no user-scope mcpServers.agent-session entry in %s", claude.UserConfigPath(home))
 	}
-	servers, _ := config["mcpServers"].(map[string]any)
-	if _, ok := servers["agent-session"]; !ok {
-		return false, "no user-scope mcpServers.agent-session entry in ~/.claude.json"
+	// A registration pointing at a binary that is gone is what a moved or
+	// reinstalled agent-session leaves behind, and Claude Code reports it as
+	// nothing at all: the server simply never starts.
+	if _, err := os.Stat(command); err != nil {
+		return false, fmt.Sprintf("user-scope MCP server points at %s, which is not there — run `agent-session init --only claude`", command)
 	}
 	return true, ""
 }
