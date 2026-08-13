@@ -35,10 +35,11 @@ This project uses Agent Session to keep work context across sessions and agents.
    - session.get - find the current session
    - context.get - load the current context (start with depth=summary, use depth=full when you need complete decisions, blockers, changed files, or the full event list)
    Continue the existing task; do not start from scratch.
-   If context.get comes back cancelled, refused, or "user cancelled MCP tool
-   call" — which is what a non-interactive sandbox reports for any tool that is
-   not annotated read-only — do NOT retry it. Call context.read instead: same
-   context, records nothing, and it is allowed there.
+   If context.get comes back cancelled or refused — a non-interactive sandbox
+   reports "user cancelled MCP tool call" for every tool not annotated
+   read-only, and no human cancelled anything — do NOT retry it and do not try
+   session.checkpoint either. Call context.read: same context, records nothing,
+   and it is allowed there.
 
 2. Record work with ONE call when possible — session.record handles events,
    decisions, next_action, and checkpoints together:

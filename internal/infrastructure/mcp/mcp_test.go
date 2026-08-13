@@ -322,6 +322,18 @@ func TestMCPInstructions(t *testing.T) {
 			t.Fatalf("instructions missing %q", want)
 		}
 	}
+
+	// The sandbox fallback has to name the symptom the client actually shows.
+	// Codex under `approval: never` cancels every tool not annotated read-only
+	// and reports `user cancelled MCP tool call`; an earlier wording said "if
+	// your sandbox refuses tools that write", and the agent retried context.get
+	// twice instead of falling back, because nothing it saw said "sandbox". The
+	// exact string has to survive rewording, so it is asserted here.
+	for _, want := range []string{"context.read", "user cancelled MCP tool call"} {
+		if !strings.Contains(initRes.Instructions, want) {
+			t.Fatalf("instructions missing %q, so a sandboxed client cannot find the read-only fallback", want)
+		}
+	}
 }
 
 func extractIDLike(t *testing.T, text, prefix string) string {

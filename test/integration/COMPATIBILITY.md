@@ -69,7 +69,13 @@ refuses tools that write" — the rollout confirms the text reached the model �
 the agent still retried `context.get` and then `session.checkpoint`, because what
 it saw was `user cancelled MCP tool call`, which reads like a human cancelling
 rather than a sandbox refusing. The instructions now quote that exact string and
-say not to retry.
+say not to retry — and `TestMCPInstructions` asserts the string, so rewording it
+away fails a test rather than quietly costing the fallback.
+
+Re-running the same command afterwards confirmed the fix: `context.get` was
+cancelled once and the agent went straight to `context.read`, with no retry and no
+`session.checkpoint` attempt. That is a behavioural check against a real model, so
+it is evidence, not coverage — the assertion above is what holds the wording.
 
 That made the documented first step unreachable there. `context.get` syncs file
 changes and may auto-checkpoint, so it is honestly not read-only and Codex was
