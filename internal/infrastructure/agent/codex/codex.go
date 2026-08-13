@@ -97,6 +97,40 @@ func (a *Adapter) Install(ctx context.Context) error {
 	return writeHooks(path, root)
 }
 
+// HooksInstalled reports whether hooks.json carries this adapter's entry for
+// every lifecycle event it installs.
+//
+// It says nothing about whether Codex will run them: that depends on the
+// per-hook trusted_hash the user's approval writes under [hooks.state] in
+// config.toml, keyed by a source/file/event identifier this adapter does not
+// construct and cannot reproduce. Callers should present the approval as a step
+// still to be taken, not as a state they have read.
+func (a *Adapter) HooksInstalled() (bool, error) {
+	dir, err := configDir()
+	if err != nil {
+		return false, err
+	}
+	root, err := readHooks(filepath.Join(dir, "hooks.json"))
+	if err != nil {
+		return false, err
+	}
+	hooks := childObject(root, "hooks")
+	for event := range hookCommands {
+		entries, _ := hooks[event].([]any)
+		installed := false
+		for _, entry := range entries {
+			if ownsEntry(entry) {
+				installed = true
+				break
+			}
+		}
+		if !installed {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (a *Adapter) Uninstall(ctx context.Context) error {
 	if err := a.uninstallHooks(); err != nil {
 		return err
@@ -219,6 +253,11 @@ func (a *Adapter) uninstallMCP() error {
 	out := removeMCPSection(string(data), "agent-session")
 	return os.WriteFile(cfg, []byte(out), 0o644)
 }
+
+// ConfigDir returns the directory Codex reads its configuration from: $CODEX_HOME
+// when set, ~/.codex otherwise. Exported so callers that inspect the same files
+// (doctor) resolve them exactly the way this adapter writes them.
+func ConfigDir() (string, error) { return configDir() }
 
 // configDir resolves Codex's config directory the same way Codex does, so an
 // uninstall edits the config that `codex mcp add` actually wrote.

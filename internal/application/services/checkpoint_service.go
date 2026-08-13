@@ -34,12 +34,20 @@ func (s *CheckpointService) Create(ctx context.Context, sessionID, label, nextAc
 // CreateKind stores a checkpoint with an explicit kind and applies retention for
 // that kind, so automatic checkpoints cannot crowd out deliberate ones.
 func (s *CheckpointService) CreateKind(ctx context.Context, sessionID, kind, label, nextAction, agent string) (*entities.Checkpoint, error) {
-	if !entities.ValidCheckpointKind(kind) {
-		kind = entities.CheckpointKindManual
-	}
 	snapshot, err := s.BuildSnapshot(ctx, sessionID)
 	if err != nil {
 		return nil, err
+	}
+	return s.CreateFromSnapshot(ctx, sessionID, kind, label, nextAction, agent, snapshot)
+}
+
+// CreateFromSnapshot stores a checkpoint for a snapshot the caller already built.
+// A caller that needs the snapshot for something else — handoff renders it — can
+// build it once, outside the transaction, instead of re-reading git inside it.
+// A non-empty nextAction overwrites the snapshot's own.
+func (s *CheckpointService) CreateFromSnapshot(ctx context.Context, sessionID, kind, label, nextAction, agent string, snapshot *entities.Snapshot) (*entities.Checkpoint, error) {
+	if !entities.ValidCheckpointKind(kind) {
+		kind = entities.CheckpointKindManual
 	}
 	if nextAction != "" {
 		snapshot.NextAction = nextAction
@@ -60,31 +68,45 @@ func (s *CheckpointService) CreateKind(ctx context.Context, sessionID, kind, lab
 		NextAction: snapshot.NextAction,
 		Agent:      agent,
 	}
-	if err := s.store.Checkpoints().Create(ctx, cp); err != nil {
+
+	// The checkpoint and the event announcing it commit together: an agent that
+	// reads the event log and follows checkpoint_id must always find the row, and
+	// a checkpoint nothing points at is invisible to the timeline.
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		if err := st.Checkpoints().Create(ctx, cp); err != nil {
+			return err
+		}
+		return st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: sessionID,
+			Agent:     agent,
+			Type:      entities.EventCheckpointCreated,
+			Payload:   `{"checkpoint_id":"` + cp.ID + `"}`,
+		})
+	}); err != nil {
 		return nil, err
 	}
 
+	// Retention runs after the commit: it is housekeeping, and a failure must not
+	// roll back the checkpoint it was pruning around.
 	if keep := s.retention.CheckpointLimit(kind); keep > 0 {
 		if pruned, perr := s.store.Checkpoints().PruneKind(ctx, sessionID, kind, keep); perr != nil {
-			// retention is housekeeping; a failure must not lose the checkpoint
 			s.logger.Warn("checkpoint retention failed", "session_id", sessionID, "kind", kind, "error", perr)
 		} else if pruned > 0 {
 			s.logger.Info("checkpoints pruned", "session_id", sessionID, "kind", kind, "pruned", pruned, "keep", keep)
 		}
 	}
 
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     agent,
-		Type:      entities.EventCheckpointCreated,
-		Payload:   `{"checkpoint_id":"` + cp.ID + `"}`,
-	}); err != nil {
-		return nil, err
-	}
-
 	s.logger.Info("checkpoint created", "checkpoint_id", cp.ID, "session_id", sessionID)
 	return cp, nil
+}
+
+// withStore returns a copy bound to st, so a caller that has opened a transaction
+// can have the checkpoint written inside it.
+func (s *CheckpointService) withStore(st ports.Store) *CheckpointService {
+	scoped := *s
+	scoped.store = st
+	return &scoped
 }
 
 // BuildSnapshot assembles the canonical state from stores and git.

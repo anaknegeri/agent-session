@@ -1,15 +1,20 @@
 package store
 
 import (
+	"context"
 	"fmt"
 
 	"gorm.io/gorm"
 
+	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 )
 
 type sqliteStore struct {
 	db *gorm.DB
+	// scoped marks a store handed to a Tx callback: it borrows the transaction's
+	// connection and must not close the pool underneath it.
+	scoped bool
 
 	projects      repositories.ProjectRepository
 	sessions      repositories.SessionRepository
@@ -24,7 +29,11 @@ type sqliteStore struct {
 }
 
 func NewSQLiteStore(db *gorm.DB) (*sqliteStore, error) {
-	s := &sqliteStore{db: db}
+	return newSQLiteStore(db, false), nil
+}
+
+func newSQLiteStore(db *gorm.DB, scoped bool) *sqliteStore {
+	s := &sqliteStore{db: db, scoped: scoped}
 	s.projects = &projectStore{db: db}
 	s.sessions = &sessionStore{db: db}
 	s.tasks = &taskStore{db: db}
@@ -35,7 +44,7 @@ func NewSQLiteStore(db *gorm.DB) (*sqliteStore, error) {
 	s.agentSessions = &agentSessionStore{db: db}
 	s.artifacts = &artifactStore{db: db}
 	s.knowledge = &knowledgeStore{db: db}
-	return s, nil
+	return s
 }
 
 func (s *sqliteStore) Projects() repositories.ProjectRepository           { return s.projects }
@@ -49,7 +58,20 @@ func (s *sqliteStore) AgentSessions() repositories.AgentSessionRepository { retu
 func (s *sqliteStore) Artifacts() repositories.ArtifactRepository         { return s.artifacts }
 func (s *sqliteStore) Knowledge() repositories.KnowledgeRepository        { return s.knowledge }
 
+// Tx binds every repository to a single GORM transaction for the duration of fn.
+// GORM turns a nested Transaction call into a SAVEPOINT, so repository methods
+// that already open their own (StartExclusive, AgentSessions.Resume) keep working
+// unchanged and commit with the outer boundary.
+func (s *sqliteStore) Tx(ctx context.Context, fn func(ports.Store) error) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(newSQLiteStore(tx, true))
+	})
+}
+
 func (s *sqliteStore) Close() error {
+	if s.scoped {
+		return nil
+	}
 	sqlDB, err := s.db.DB()
 	if err != nil {
 		return fmt.Errorf("get sql db: %w", err)

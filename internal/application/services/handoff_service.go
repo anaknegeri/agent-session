@@ -50,11 +50,10 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 	}
 
 	from := session.LastAgent
-	cp, err := s.checkpoints.CreateKind(ctx, sessionID, entities.CheckpointKindHandoff, "handoff", "", from)
-	if err != nil {
-		return "", err
-	}
 
+	// Built once, before the writes: the handoff checkpoint stores this snapshot
+	// and the target agent reads the text rendered from it, so they cannot
+	// disagree — and neither git nor the renderer runs while the write lock is held.
 	snapshot, err := s.checkpoints.BuildSnapshot(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -65,24 +64,37 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 		return "", err
 	}
 
-	session.LastAgent = to
-	if err := s.store.Sessions().Update(ctx, session); err != nil {
-		return "", err
-	}
-
 	handoffID := ids.New("handoff")
-	payload, _ := json.Marshal(map[string]string{
-		"handoff_id":    handoffID,
-		"from_agent":    from,
-		"to_agent":      to,
-		"checkpoint_id": cp.ID,
-	})
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     from,
-		Type:      entities.EventHandoffCreated,
-		Payload:   string(payload),
+	var cp *entities.Checkpoint
+
+	// The checkpoint, the new owning agent and the handoff event are one
+	// transition. Half of it applied means the session names an agent that was
+	// never handed the context, or a checkpoint no handoff event refers to.
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		var err error
+		cp, err = s.checkpoints.withStore(st).CreateFromSnapshot(ctx, sessionID, entities.CheckpointKindHandoff, "handoff", "", from, snapshot)
+		if err != nil {
+			return err
+		}
+
+		session.LastAgent = to
+		if err := st.Sessions().Update(ctx, session); err != nil {
+			return err
+		}
+
+		payload, _ := json.Marshal(map[string]string{
+			"handoff_id":    handoffID,
+			"from_agent":    from,
+			"to_agent":      to,
+			"checkpoint_id": cp.ID,
+		})
+		return st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: sessionID,
+			Agent:     from,
+			Type:      entities.EventHandoffCreated,
+			Payload:   string(payload),
+		})
 	}); err != nil {
 		return "", err
 	}

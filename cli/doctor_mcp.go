@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
 	"github.com/anaknegeri/agent-session/pkg/logger"
 	"github.com/anaknegeri/agent-session/pkg/port"
@@ -89,7 +91,25 @@ func checkUserScope() bool {
 		ok = false
 		fmt.Printf("✗ %s not wired at user scope: %s\n  run `agent-session init --only %s`\n", a.Name, detail, a.Name)
 	}
+	reportCodexHookApproval()
 	return ok
+}
+
+// reportCodexHookApproval reminds the reader that installed Codex hooks stay
+// inert until they approve them once in Codex itself. It is not a pass/fail
+// check: the approval is recorded as a per-hook trusted_hash under [hooks.state]
+// in config.toml, keyed by an identifier agent-session cannot reproduce, so
+// claiming to know the state either way would be a guess.
+func reportCodexHookApproval() {
+	if _, err := exec.LookPath("codex"); err != nil {
+		return
+	}
+	installed, err := codex.NewAdapter().HooksInstalled()
+	if err != nil || !installed {
+		return
+	}
+	fmt.Printf("- codex hooks are installed; they run only after you approve them once in `codex`\n" +
+		"  (until then: MCP tools work, automatic resume/checkpoint does not)\n")
 }
 
 func userScopeWired(home, name string) (bool, string) {
@@ -158,11 +178,18 @@ func cursorUserScopeWired(home string) (bool, string) {
 	return true, ""
 }
 
+// codexUserScopeWired resolves the config through the adapter rather than
+// assuming ~/.codex, so a reader who moved Codex with CODEX_HOME is not told
+// their working setup is missing.
 func codexUserScopeWired(home string) (bool, string) {
-	path := filepath.Join(home, ".codex", "config.toml")
+	dir, err := codex.ConfigDir()
+	if err != nil {
+		dir = filepath.Join(home, ".codex")
+	}
+	path := filepath.Join(dir, "config.toml")
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return false, "missing ~/.codex/config.toml"
+		return false, fmt.Sprintf("missing %s", path)
 	}
 	if !strings.Contains(string(data), "[mcp_servers.agent-session]") {
 		return false, "no [mcp_servers.agent-session] section"

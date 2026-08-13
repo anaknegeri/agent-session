@@ -1,6 +1,8 @@
 package ports
 
 import (
+	"context"
+
 	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 )
 
@@ -17,5 +19,16 @@ type Store interface {
 	AgentSessions() repositories.AgentSessionRepository
 	Artifacts() repositories.ArtifactRepository
 	Knowledge() repositories.KnowledgeRepository
+
+	// Tx runs fn against a Store whose repositories all share one transaction, so
+	// a use case that writes several rows commits them together or not at all.
+	// Returning an error rolls every write back. A repository that opens its own
+	// transaction inside fn joins this one instead of starting a second.
+	//
+	// fn must not do slow work: the transaction holds the write lock, and other
+	// agents on the same project are blocked meanwhile. Read git, render text and
+	// marshal payloads before entering it.
+	Tx(ctx context.Context, fn func(Store) error) error
+
 	Close() error
 }

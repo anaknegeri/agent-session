@@ -147,10 +147,18 @@ func installCodex(bin string) {
 		red("✗ codex hooks: %v\n", err)
 		return
 	}
-	green("✓ codex: mcp_servers.agent-session + hooks (auto resume/checkpoint)\n")
-	// Codex will not run a newly written hook until it has been approved once,
-	// so say so here rather than let it look wired but silently inert.
-	yellow("  codex hooks start untrusted: run `codex`, approve agent-session in the hooks review, once per machine\n")
+	green("✓ codex: mcp_servers.agent-session + hooks written to ~/.codex/hooks.json\n")
+	// Codex discovers a newly written hook but will not run it until the user has
+	// approved it once, which records a trusted_hash in config.toml. Writing that
+	// hash here would defeat the gate that stops an installer from wiring shell
+	// commands into someone's agent, so setup spells the manual step out instead
+	// of leaving the hooks looking wired while they are silently inert.
+	yellow("  ! automatic resume/checkpoint is not active yet — Codex hooks need a one-time approval:\n")
+	yellow("      1. run `codex` in a project that has .agent/\n")
+	yellow("      2. approve the agent-session hooks when Codex asks (once per machine)\n")
+	yellow("    Until then the MCP tools work, but nothing is resumed or checkpointed on its own.\n")
+	yellow("    agent-session cannot approve on your behalf: that gate is what stops an installer\n")
+	yellow("    from wiring shell commands into your agent.\n")
 }
 
 func installCursor(dir, bin string) {

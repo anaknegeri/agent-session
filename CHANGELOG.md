@@ -14,8 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   touch the real agent configuration and produces the same take on any machine.
 - **`AGENT_SESSION_LOG_LEVEL`** — overrides the log level for the CLI and the MCP
   server (`debug`, `info`, `warn`, `error`).
+- **`Store.Tx`** — the store port can now run a set of writes as one transaction,
+  so a use case that touches several tables commits all of it or none.
 
 ### Changed
+- **`init` spells out the one-time Codex hook approval.** Codex writes the hooks but
+  will not execute them until they are approved once in the TUI, so setup used to
+  read as if automatic resume and checkpoint were live when they were not. `init`
+  now says what is inactive, the two steps that activate it, and why agent-session
+  does not record the trust hash itself. `doctor` repeats the reminder when the
+  hooks are installed.
+- `doctor` resolves the Codex config through `$CODEX_HOME` like the adapter does,
+  instead of assuming `~/.codex`.
 - **The CLI no longer prints slog records over its own output.** Commands wrote
   human-readable output on stdout while the application logger wrote `level=INFO`
   lines for the same actions on stderr, so `handoff` and `checkpoint` came back with
@@ -32,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   recording & nudges".
 
 ### Fixed
+- **Starting a session could leave the previous one in a split state.**
+  `StartExclusive` committed the new session and the completion of the old one, and
+  only then closed the old agent session and appended `session.completed`. A failure
+  in between left a session marked completed with its agent session still open and
+  no event to explain it, plus a new session with no agent session and no
+  `session.started`. Start, resume, complete, checkpoint (with its
+  `checkpoint.created` event) and handoff (checkpoint, new owning agent and
+  `handoff.created`) now each commit as a single transaction. Handoff also builds
+  its snapshot once instead of twice, so git is not re-read while the write lock is
+  held.
 - README claimed 6 MCP resources; the server exposes 7 (`resources/list` on 0.1.6).
 
 ## [0.1.6] — 2026-08-12
