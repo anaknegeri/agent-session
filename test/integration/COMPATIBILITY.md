@@ -58,6 +58,19 @@ carrying `readOnlyHint` and raises a permission request for every other tool. A
 non-interactive run has nobody to answer it, so the request is auto-cancelled and
 the tool call comes back `failed` / `user cancelled MCP tool call`.
 
+Widening the sandbox does not loosen this: a `codex exec --sandbox workspace-write`
+run on 13 August 2026 had `context.get` cancelled twice and `session.checkpoint`
+cancelled once, while `session.get` went through. The sandbox governs what the
+*shell* may write; MCP tool approval is a separate gate keyed on the annotation.
+
+That run also showed the instructions have to name the symptom rather than the
+cause. The server told the agent to fall back to `context.read` "if your sandbox
+refuses tools that write" — the rollout confirms the text reached the model — and
+the agent still retried `context.get` and then `session.checkpoint`, because what
+it saw was `user cancelled MCP tool call`, which reads like a human cancelling
+rather than a sandbox refusing. The instructions now quote that exact string and
+say not to retry.
+
 That made the documented first step unreachable there. `context.get` syncs file
 changes and may auto-checkpoint, so it is honestly not read-only and Codex was
 right to refuse it — the agent then answered from `session.get` alone and reported
