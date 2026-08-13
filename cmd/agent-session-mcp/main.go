@@ -29,7 +29,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
-	server := mcp.New(root, logger.New("info"))
+	server := mcp.New(root, logger.FromEnv("info"))
 	switch *transport {
 	case "stdio":
 		if err := server.ServeStdio(); err != nil {

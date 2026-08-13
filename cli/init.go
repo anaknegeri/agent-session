@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -53,7 +55,7 @@ func newInitCmd() *cobra.Command {
 				return err
 			}
 			if path != "" {
-				fmt.Printf("✓ wrote universal instructions to %s\n", path)
+				fmt.Printf("✓ wrote universal instructions to %s\n", displayPath(dir, path))
 			} else {
 				fmt.Printf("✓ AGENTS.md already has Agent Session instructions\n")
 			}
@@ -137,4 +139,14 @@ func installAgent(dir, bin, name string) {
 	default:
 		red("✗ unknown agent %q\n", name)
 	}
+}
+
+// displayPath shortens a path that lives under dir to a relative one, so setup
+// output reads `AGENTS.md` instead of the reader's full home directory.
+func displayPath(dir, path string) string {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return path
+	}
+	return rel
 }

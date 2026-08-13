@@ -181,7 +181,7 @@ func newMCPCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			server := mcp.New(root, logger.New("info"))
+			server := mcp.New(root, logger.FromEnv("info"))
 			switch transport {
 			case "stdio", "":
 				return server.ServeStdio()

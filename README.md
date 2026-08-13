@@ -1,20 +1,33 @@
-# Agent Session
-
-> **One session. Any coding agent.**
-
 <p align="center">
-  <img src="docs/banner.png" alt="Agent Session — One session. Any coding agent." width="80%">
+  <img src="docs/banner.png" alt="Agent Session — universal session &amp; handoff layer for AI coding agents" width="80%">
 </p>
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Agent Session demo — init, start, status, checkpoint, handoff, resume" width="90%">
+  <a href="https://github.com/anaknegeri/agent-session/releases/latest"><img src="https://img.shields.io/github/v/release/anaknegeri/agent-session?style=flat-square&color=2dd4bf&label=release" alt="Latest release"></a>
+  <a href="https://github.com/anaknegeri/agent-session/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/anaknegeri/agent-session/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
+  <a href="go.mod"><img src="https://img.shields.io/badge/go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.25"></a>
+  <img src="https://img.shields.io/badge/mcp-24%20tools%20%C2%B7%207%20resources-5eead4?style=flat-square" alt="MCP: 24 tools, 7 resources">
+  <img src="https://img.shields.io/badge/deps-none-4ade80?style=flat-square" alt="No runtime dependencies">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
 </p>
 
-Universal session & handoff layer for AI coding agents.
-Switch between **Claude Code, Codex, OpenCode** — and any future agent — without losing context.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#make-every-agent-use-agent-session-automatically">Wire your agents</a> ·
+  <a href="#mcp">MCP</a> ·
+  <a href="#token-savings">Token savings</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a>
+</p>
+
+---
+
+**One session. Any coding agent.** Switch between **Claude Code, Codex, OpenCode**
+— and whatever ships next — without re-explaining the work.
 
 Agent Session is not another AI memory database. It is a **local, Git-aware session
-layer**: agents are interchangeable workers, and the session is the portable state of the work.
+layer**: agents are interchangeable workers, and the session is the portable state
+of the work. One binary, one SQLite file per project, no daemon.
 
 ---
 
@@ -23,7 +36,7 @@ layer**: agents are interchangeable workers, and the session is the portable sta
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
 - **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline.
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
-- **MCP-native** — 24 tools + 6 resources over stdio or streamable-http.
+- **MCP-native** — 24 tools + 7 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
 - **Checkpoint & handoff** — snapshot the work, hand it to another agent deterministically.
 - **Always available** — agents spawn the stdio MCP server on demand; optional user-scope registration.
@@ -106,6 +119,14 @@ agent-session plugin install claude --scope user
 ---
 
 ## Quick start
+
+<p align="center">
+  <img src="docs/demo.gif" alt="One take: agent-session init wires every installed agent, start opens a session, status shows tasks and decisions, handoff hands the whole thing to Codex" width="100%">
+</p>
+
+<p align="center">
+  <sub><code>init</code> wires every agent on the machine · <code>status</code> shows what the last agent recorded · <code>handoff</code> passes the session on. Rendered from <a href="docs/demo.tape">docs/demo.tape</a>.</sub>
+</p>
 
 ```bash
 cd your-project
@@ -316,43 +337,6 @@ Every checkpoint records what triggered it — `manual`, `auto` (Stop hook or a
 stale context), `precompact`, or `handoff` — and retention is applied per kind.
 The session's most recent checkpoint is never pruned.
 
-## Project discovery
-
-The MCP server is registered once at user scope, so it can start in a directory
-that has nothing to do with the project being worked on. The project root is
-resolved in this order:
-
-1. `$AGENT_SESSION_PROJECT`, when it names a directory that exists
-2. the nearest ancestor containing `.agent/`, searching no further up than the
-   git repository that contains the starting directory
-3. the git repository root, when there is no `.agent/` inside it yet
-4. the starting directory
-
-The search stops at the repository boundary on purpose. Running `agent-session
-init` in `$HOME` once puts a `.agent/` above every repository, and without that
-boundary any uninitialized repo underneath resolved to that unrelated project and
-recorded its session there. Outside a git repository there is no boundary to
-stop at, which is what `AGENT_SESSION_PROJECT` is for:
-
-```bash
-AGENT_SESSION_PROJECT=/path/to/project agent-session context
-```
-
-## Automatic recording & nudges
-
-Agent Session is designed so agents never have to remember to record state:
-
-- **Auto-record file changes** — `context.get` compares git status against
-  recorded events and appends `file.changed` for anything new, so file edits
-  are captured even if the agent never calls `event.append`.
-- **Auto-checkpoint when stale** — if no checkpoint exists in the last 10
-  minutes and the git tree is dirty, `context.get` creates one automatically.
-- **Context nudges** — the summary view warns about stale checkpoints
-  (>30 min), unrecorded changed files, and open blockers, so the agent knows
-  when to checkpoint.
-- **`session.record`** — record an event, a decision, `next_action`, and/or a
-  checkpoint in one tool call instead of several.
-
 ### Benchmark
 
 Reproducible benchmark at `bench/token-benchmark.sh` measures the real output
@@ -409,6 +393,49 @@ Reproduce:
 ```bash
 ./bench/token-benchmark.sh
 ```
+
+---
+
+## Project discovery
+
+The MCP server is registered once at user scope, so it can start in a directory
+that has nothing to do with the project being worked on. The project root is
+resolved in this order:
+
+1. `$AGENT_SESSION_PROJECT`, when it names a directory that exists
+2. the nearest ancestor containing `.agent/`, searching no further up than the
+   git repository that contains the starting directory
+3. the git repository root, when there is no `.agent/` inside it yet
+4. the starting directory
+
+The search stops at the repository boundary on purpose. Running `agent-session
+init` in `$HOME` once puts a `.agent/` above every repository, and without that
+boundary any uninitialized repo underneath resolved to that unrelated project and
+recorded its session there. Outside a git repository there is no boundary to
+stop at, which is what `AGENT_SESSION_PROJECT` is for:
+
+```bash
+AGENT_SESSION_PROJECT=/path/to/project agent-session context
+```
+
+---
+
+## Automatic recording & nudges
+
+Agent Session is designed so agents never have to remember to record state:
+
+- **Auto-record file changes** — `context.get` compares git status against
+  recorded events and appends `file.changed` for anything new, so file edits
+  are captured even if the agent never calls `event.append`.
+- **Auto-checkpoint when stale** — if no checkpoint exists in the last 10
+  minutes and the git tree is dirty, `context.get` creates one automatically.
+- **Context nudges** — the summary view warns about stale checkpoints
+  (>30 min), unrecorded changed files, and open blockers, so the agent knows
+  when to checkpoint.
+- **`session.record`** — record an event, a decision, `next_action`, and/or a
+  checkpoint in one tool call instead of several.
+
+---
 
 ## Configuration
 

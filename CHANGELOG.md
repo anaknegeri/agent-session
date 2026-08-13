@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`make demo`** — re-renders `docs/demo.gif` from `docs/demo.tape`. The tape builds
+  agent-session from the working tree and sources `docs/demo-setup.sh`, which points
+  `HOME` and `CODEX_HOME` at a throwaway directory, so recording the demo cannot
+  touch the real agent configuration and produces the same take on any machine.
+- **`AGENT_SESSION_LOG_LEVEL`** — overrides the log level for the CLI and the MCP
+  server (`debug`, `info`, `warn`, `error`).
+
+### Changed
+- **The CLI no longer prints slog records over its own output.** Commands wrote
+  human-readable output on stdout while the application logger wrote `level=INFO`
+  lines for the same actions on stderr, so `handoff` and `checkpoint` came back with
+  `time=… level=INFO msg="checkpoint created" …` in front of them. The CLI now
+  defaults to `warn` and keeps the informational records behind
+  `AGENT_SESSION_LOG_LEVEL=info`; the MCP server, whose stderr is a log stream and
+  not output, still defaults to `info`.
+- `init` prints the AGENTS.md path relative to the project instead of an absolute
+  one, so setup output does not depend on where the project lives.
+- **README** — badges (release, CI, Go, MCP surface, license) and a section index at
+  the top; the demo GIF moved out from directly under the banner into Quick start,
+  where it illustrates the commands next to it; the benchmark tables moved under
+  Token savings, whose subsection they are, rather than trailing "Automatic
+  recording & nudges".
+
+### Fixed
+- README claimed 6 MCP resources; the server exposes 7 (`resources/list` on 0.1.6).
+
 ## [0.1.6] — 2026-08-12
 
 Includes the entries below that shipped in 0.1.5, which was tagged without a

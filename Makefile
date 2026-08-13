@@ -16,7 +16,7 @@ LDFLAGS      := -s -w \
 	-X $(VERSION_PKG).Commit=$(COMMIT) \
 	-X $(VERSION_PKG).Date=$(BUILD_DATE)
 
-.PHONY: all build mcp install test vet lint fmt tidy plugin cross-compile version clean
+.PHONY: all build mcp install test vet lint fmt tidy plugin cross-compile version demo clean
 
 all: build mcp
 
@@ -59,6 +59,11 @@ version:
 	@echo "version:    $(VERSION)"
 	@echo "commit:     $(COMMIT)"
 	@echo "build date: $(BUILD_DATE)"
+
+# Re-renders the README demo. Needs vhs (brew install vhs) plus ttyd and ffmpeg;
+# the tape builds its own binary and runs against a throwaway HOME.
+demo:
+	vhs docs/demo.tape
 
 clean:
 	rm -rf bin
