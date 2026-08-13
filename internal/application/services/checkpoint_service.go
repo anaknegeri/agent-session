@@ -10,6 +10,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/config"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
+	"github.com/anaknegeri/agent-session/pkg/contract"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
@@ -177,6 +178,7 @@ func (s *CheckpointService) BuildSnapshotWith(ctx context.Context, sessionID str
 	}
 
 	snapshot := &entities.Snapshot{
+		Version: contract.Checkpoint,
 		Session: entities.SessionState{
 			ID:     session.ID,
 			Title:  session.Title,
@@ -456,10 +458,25 @@ func (s *CheckpointService) Restore(ctx context.Context, sessionID string) (*ent
 }
 
 // ParseSnapshot unmarshals a checkpoint snapshot.
+//
+// It refuses a snapshot from a newer Checkpoint Schema version. By the rule in
+// docs/spec/README.md a bump only happens for a change that could make an
+// existing reader wrong, so reading one anyway would mean rendering context, a
+// diff or a restore off a shape this build does not understand — worse than
+// saying so. This is reachable by downgrading the binary in a project whose
+// checkpoints a newer one wrote.
 func (s *CheckpointService) ParseSnapshot(cp *entities.Checkpoint) (*entities.Snapshot, error) {
 	var snap entities.Snapshot
 	if err := json.Unmarshal([]byte(cp.Snapshot), &snap); err != nil {
 		return nil, domainerr.ErrInvalidSnapshot
+	}
+	if snap.Version > contract.Checkpoint {
+		return nil, fmt.Errorf("%w: checkpoint %s uses snapshot schema v%d, this build understands v%d — upgrade agent-session",
+			domainerr.ErrInvalidSnapshot, cp.ID, snap.Version, contract.Checkpoint)
+	}
+	// written before the field existed; the shape is v1 (docs/spec/checkpoint-v1.md)
+	if snap.Version == 0 {
+		snap.Version = contract.Checkpoint
 	}
 	return &snap, nil
 }

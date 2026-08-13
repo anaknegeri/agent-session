@@ -529,7 +529,14 @@ func (s *Server) registerTools() {
 		if spec.idempotent {
 			annotation.IdempotentHint = mcp.ToBoolPtr(true)
 		}
-		toolOpts := append(spec.options, mcp.WithToolAnnotation(annotation))
+		// The description has to be an option too. Every tool carried one in its
+		// spec and none of them reached the client, so agents were choosing
+		// between 25 names with nothing to go on — the opposite of what the
+		// annotations are for.
+		toolOpts := make([]mcp.ToolOption, 0, len(spec.options)+2)
+		toolOpts = append(toolOpts, mcp.WithDescription(spec.desc))
+		toolOpts = append(toolOpts, spec.options...)
+		toolOpts = append(toolOpts, mcp.WithToolAnnotation(annotation))
 		s.mcp.AddTool(mcp.NewTool(spec.name, toolOpts...), func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			if err := s.ready(); err != nil {
 				return mcp.NewToolResultError(err.Error()), nil

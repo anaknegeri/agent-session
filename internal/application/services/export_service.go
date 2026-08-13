@@ -170,7 +170,7 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 
 	for _, d := range exp.Decisions {
 		dec := &entities.Decision{
-			ID:        ids.New("dec"),
+			ID:        ids.New("decision"),
 			SessionID: session.ID,
 			Decision:  d.Decision,
 			Reason:    d.Reason,
@@ -184,7 +184,7 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 			continue
 		}
 		blocker := &entities.Blocker{
-			ID:          ids.New("blk"),
+			ID:          ids.New("blocker"),
 			SessionID:   session.ID,
 			Description: bl.Description,
 			Status:      entities.BlockerStatusOpen,

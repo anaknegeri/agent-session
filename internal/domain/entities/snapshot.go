@@ -1,7 +1,15 @@
 package entities
 
-// Snapshot is the canonical session state stored in a checkpoint (PRD §15).
+// Snapshot is the canonical session state stored in a checkpoint (PRD §15),
+// specified as Checkpoint Schema v1 in docs/spec/checkpoint-v1.md.
 type Snapshot struct {
+	// Version is the Checkpoint Schema version this snapshot was written
+	// against. A checkpoint outlives the build that wrote it, so the reader has
+	// to be told what it is holding rather than assume the current shape.
+	//
+	// Zero means a snapshot written before the field existed. Those are v1: the
+	// field was added when the schema was specified, not when it changed.
+	Version    int            `json:"version"`
 	Session    SessionState   `json:"session"`
 	Workspace  WorkspaceState `json:"workspace"`
 	Task       TaskState      `json:"task"`

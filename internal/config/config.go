@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/pelletier/go-toml/v2"
+
+	"github.com/anaknegeri/agent-session/pkg/contract"
 )
 
 const (
@@ -18,6 +20,9 @@ const (
 )
 
 type Config struct {
+	// Format records which Agent Session Format the .agent/ directory follows,
+	// so a build that reads it can tell whether it understands the layout.
+	Format  FormatConfig  `toml:"format"`
 	Project ProjectConfig `toml:"project"`
 	Storage StorageConfig `toml:"storage"`
 	Session SessionConfig `toml:"session"`
@@ -28,6 +33,12 @@ type Config struct {
 	// Retention bounds checkpoint growth. A long session produced 85 checkpoints
 	// averaging 7.5 KB of snapshot each with no limit at all.
 	Retention RetentionConfig `toml:"retention"`
+}
+
+// FormatConfig carries the Agent Session Format version of this .agent/
+// directory (docs/spec/format-v1.md).
+type FormatConfig struct {
+	Version int `toml:"version"`
 }
 
 type ProjectConfig struct {
@@ -104,6 +115,7 @@ type SyncConfig struct {
 // Default returns a zero-config config (PRD: install → init → usable).
 func Default() *Config {
 	return &Config{
+		Format:  FormatConfig{Version: contract.Format},
 		Project: ProjectConfig{},
 		Storage: StorageConfig{Driver: "sqlite"},
 		Session: SessionConfig{AutoCheckpoint: true, SmartCheckpoint: true},
@@ -149,6 +161,14 @@ func Load(root string) (*Config, error) {
 	cfg := Default()
 	if err := toml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	// A config written before [format] existed leaves the default in place, which
+	// is right: the layout it describes is v1, the version was only written down
+	// once the format was specified. A higher number is a real problem — the
+	// directory was laid out by a build that knows things this one does not.
+	if cfg.Format.Version > contract.Format {
+		return nil, fmt.Errorf("%s declares Agent Session Format v%d, this build understands v%d — upgrade agent-session",
+			path, cfg.Format.Version, contract.Format)
 	}
 	return cfg, nil
 }

@@ -17,6 +17,7 @@
   <a href="#make-every-agent-use-agent-session-automatically">Wire your agents</a> ·
   <a href="#mcp">MCP</a> ·
   <a href="#token-savings">Token savings</a> ·
+  <a href="#contracts">Contracts</a> ·
   <a href="ARCHITECTURE.md">Architecture</a>
 </p>
 
@@ -485,14 +486,48 @@ project/
 
 Everything stays local. Add `.agent/` to `.gitignore`, or commit it later for git-sync (phase 2).
 
+`config.toml` records the format version (`[format] version = 1`) so a future build
+can tell whether it understands the layout — see
+[docs/spec/format-v1.md](docs/spec/format-v1.md).
+
 ---
 
 ## Security & privacy
 
 - **Local only by default** — no data leaves the machine.
-- A shared session is **untrusted context**: events and checkpoints carry
-  `source`, `agent`, `timestamp` so agents treat them as state, not instructions.
+- A shared session is **untrusted context**. Any agent can write to it, so
+  everything an agent authored — task titles, decisions, blockers, event payloads,
+  memory — is rendered under an `(untrusted)` heading with a legend saying it is
+  data and not instructions, and is flattened to a single line first so it cannot
+  forge a section of its own. The MCP server states the same rule in its
+  initialization instructions.
 - No credentials or secrets are stored by the session layer.
+
+---
+
+## Contracts
+
+A session is written by one agent and read by another, often by a different build
+of this binary. Six interfaces cross that boundary and are specified in
+[`docs/spec`](docs/spec/README.md), all at **v1**:
+
+| Contract | Covers |
+| --- | --- |
+| [Agent Session Format](docs/spec/format-v1.md) | the `.agent/` layout, ID prefixes, timestamp encodings |
+| [Checkpoint Schema](docs/spec/checkpoint-v1.md) | the snapshot JSON inside a checkpoint |
+| [Event Schema](docs/spec/event-v1.md) | event types and their payloads |
+| [Context Schema](docs/spec/context-v1.md) | the rendered context document |
+| [Handoff Schema](docs/spec/handoff-v1.md) | the handoff document and its event |
+| [MCP Tool Contract](docs/spec/mcp-tools-v1.md) | the 25-tool / 7-resource surface and its annotations |
+
+The versions live in [`pkg/contract`](pkg/contract/contract.go) and every one of
+them is held to its spec by [`test/contract`](test/contract), so drift fails the
+build instead of surfacing later as an agent misreading a session. `.agent/` and
+each checkpoint record the version they were written against, and a build refuses
+to read a version it does not understand rather than guess.
+
+The rule: **bump for any change that could make an existing reader wrong**, no bump
+for additive change. See [docs/spec/README.md](docs/spec/README.md).
 
 ---
 
