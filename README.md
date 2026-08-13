@@ -6,7 +6,7 @@
   <a href="https://github.com/anaknegeri/agent-session/releases/latest"><img src="https://img.shields.io/github/v/release/anaknegeri/agent-session?style=flat-square&color=2dd4bf&label=release" alt="Latest release"></a>
   <a href="https://github.com/anaknegeri/agent-session/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/anaknegeri/agent-session/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
   <a href="go.mod"><img src="https://img.shields.io/badge/go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.25"></a>
-  <img src="https://img.shields.io/badge/mcp-24%20tools%20%C2%B7%207%20resources-5eead4?style=flat-square" alt="MCP: 24 tools, 7 resources">
+  <img src="https://img.shields.io/badge/mcp-25%20tools%20%C2%B7%207%20resources-5eead4?style=flat-square" alt="MCP: 25 tools, 7 resources">
   <img src="https://img.shields.io/badge/deps-none-4ade80?style=flat-square" alt="No runtime dependencies">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
 </p>
@@ -36,7 +36,7 @@ of the work. One binary, one SQLite file per project, no daemon.
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
 - **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline.
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
-- **MCP-native** — 24 tools + 7 resources over stdio or streamable-http.
+- **MCP-native** — 25 tools + 7 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
 - **Checkpoint & handoff** — snapshot the work, hand it to another agent deterministically.
 - **Always available** — agents spawn the stdio MCP server on demand; optional user-scope registration.
@@ -252,7 +252,7 @@ return `project not initialized, run agent-session init` instead of a connection
 ### Tools
 
 `session.get`, `session.checkpoint`, `session.diff`, `session.resume`, `session.record`,
-`context.get`, `context.update`, `context.summarize`,
+`context.get`, `context.read`, `context.update`, `context.summarize`,
 `task.create`, `task.get`, `task.update`, `decision.list`, `decision.create`,
 `blocker.create`, `blocker.list`, `blocker.resolve`, `event.append`,
 `workspace.status`, `workspace.diff`,

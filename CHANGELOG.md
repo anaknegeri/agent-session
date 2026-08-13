@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   server (`debug`, `info`, `warn`, `error`).
 - **`Store.Tx`** — the store port can now run a set of writes as one transaction,
   so a use case that touches several tables commits all of it or none.
+- **`context.read`** — the session context without recording anything: same output as
+  `context.get`, minus the file-change sync and the auto-checkpoint. It exists because
+  Codex under `approval: never` (what `codex exec` uses) executes only the MCP tools
+  annotated read-only and auto-cancels the rest, which left the documented first step
+  of the workflow unreachable in any non-interactive Codex run. Keep using
+  `context.get` where writes are allowed, so file changes stay recorded.
 
 ### Changed
 - **`init` spells out the one-time Codex hook approval.** Codex writes the hooks but
@@ -49,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   recording & nudges".
 
 ### Fixed
+- **`context.summarize` was annotated read-only but wrote to the session.** It went
+  through the same `context.get` path that syncs file changes and can auto-checkpoint
+  — the path `context.get` is deliberately *not* marked read-only for. Clients that
+  gate tool calls on `readOnlyHint`, as Codex does, were letting it through on a
+  promise it broke. It now reads without recording, and a test holds every tool
+  advertising `readOnlyHint` to a state fingerprint, so the next mis-annotation fails
+  the build instead of shipping.
 - **Starting a session could leave the previous one in a split state.**
   `StartExclusive` committed the new session and the completion of the old one, and
   only then closed the old agent session and appended `session.completed`. A failure

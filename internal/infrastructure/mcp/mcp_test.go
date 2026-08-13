@@ -2,6 +2,7 @@ package mcp_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -387,4 +388,88 @@ func appSessionID(app *bootstrap.App) string {
 		return ""
 	}
 	return s.ID
+}
+
+// TestReadOnlyToolsDoNotWrite holds every tool that advertises readOnlyHint to
+// what the hint claims. It is not decoration: Codex under `approval: never`
+// executes read-only MCP tools and asks permission for the rest, so a tool that
+// writes while claiming otherwise slips past the client's own gate.
+//
+// The check is a state fingerprint rather than a per-tool assertion, so a tool
+// added later is covered without touching this test.
+func TestReadOnlyToolsDoNotWrite(t *testing.T) {
+	c, app := setupMCP(t)
+	ctx := context.Background()
+
+	// give the session something to read: a task, a decision and a dirty file, so
+	// the tools take their populated paths rather than returning early on an empty
+	// session — and so the auto-record path has something it would record
+	call(t, c, "task.create", map[string]any{"title": "read-only audit"})
+	call(t, c, "decision.create", map[string]any{"decision": "annotate honestly", "reason": "clients gate on it"})
+	if err := writeFile(filepath.Join(app.Root, "changed.go"), "package oauth\n\n// dirty\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := c.ListTools(ctx, mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var readOnly []string
+	for _, tl := range res.Tools {
+		if tl.Annotations.ReadOnlyHint != nil && *tl.Annotations.ReadOnlyHint {
+			readOnly = append(readOnly, tl.Name)
+		}
+	}
+	if len(readOnly) == 0 {
+		t.Fatal("no tool advertises readOnlyHint; the annotation wiring is broken")
+	}
+
+	for _, name := range readOnly {
+		before := storeFingerprint(t, app)
+		// callAny: a tool may legitimately fail for want of arguments, and a failed
+		// call must still not have written anything
+		callAny(t, c, name, nil)
+		after := storeFingerprint(t, app)
+		if before != after {
+			t.Errorf("%s is annotated readOnly but changed the session state:\n before %s\n after  %s", name, before, after)
+		}
+	}
+}
+
+// storeFingerprint summarises everything a read-only tool must leave alone.
+func storeFingerprint(t *testing.T, app *bootstrap.App) string {
+	t.Helper()
+	ctx := context.Background()
+	projectID, err := app.ResolveProjectID(ctx, app.Root)
+	if err != nil {
+		t.Fatalf("resolve project: %v", err)
+	}
+	session, err := app.Session.GetLatest(ctx, projectID)
+	if err != nil {
+		t.Fatalf("get latest session: %v", err)
+	}
+	events, err := app.Event.List(ctx, session.ID, 1000)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	checkpoints, err := app.Checkpoint.ListBySession(ctx, session.ID, 1000)
+	if err != nil {
+		t.Fatalf("list checkpoints: %v", err)
+	}
+	tasks, err := app.Task.List(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	decisions, err := app.Decision.List(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("list decisions: %v", err)
+	}
+	memories, err := app.Memory.ListByKind(ctx, "", 1000)
+	if err != nil {
+		t.Fatalf("list memory: %v", err)
+	}
+	return fmt.Sprintf("session=%s last_agent=%s task=%s events=%d checkpoints=%d tasks=%d decisions=%d memory=%d",
+		session.ID, session.LastAgent, session.CurrentTaskID,
+		len(events), len(checkpoints), len(tasks), len(decisions), len(memories))
 }

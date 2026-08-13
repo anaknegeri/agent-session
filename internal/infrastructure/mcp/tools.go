@@ -33,6 +33,7 @@ var toolFlags = map[string]toolFlagSpec{
 	"session.get":        {readOnly: true},
 	"session.diff":       {readOnly: true},
 	"context.get":        {idempotent: true}, // auto-syncs file changes and may auto-checkpoint — not read-only
+	"context.read":       {readOnly: true},
 	"context.summarize":  {readOnly: true},
 	"session.record":     {idempotent: true},
 	"task.get":           {readOnly: true},
@@ -169,6 +170,24 @@ func (s *Server) registerTools() {
 			},
 		},
 		{
+			name: "context.read",
+			desc: "Read the session context without recording anything. Same output as context.get, but skips the file-change sync and the auto-checkpoint. Use this when the client runs read-only; prefer context.get otherwise so file changes stay recorded.",
+			options: []mcp.ToolOption{
+				mcp.WithString("depth", mcp.Description("summary|recent|full")),
+			},
+			run: func(ctx context.Context, args map[string]any) (any, error) {
+				sessionID, err := s.currentSession(ctx)
+				if err != nil {
+					return nil, err
+				}
+				depth := argString(args, "depth")
+				if depth == "" {
+					depth = "summary"
+				}
+				return s.app.Context.Read(ctx, sessionID, depth)
+			},
+		},
+		{
 			name: "context.update",
 			desc: "Update a context field (task_title, task_status, next_action, session_title).",
 			options: []mcp.ToolOption{
@@ -185,7 +204,10 @@ func (s *Server) registerTools() {
 				if err != nil {
 					return nil, err
 				}
-				contextText, err := s.app.Context.Get(ctx, sessionID, "summary")
+				// Read, not Get: this tool is annotated read-only, and Get syncs file
+				// changes and may auto-checkpoint. A client that trusts the annotation
+				// would have been writing to the session while believing it was not.
+				contextText, err := s.app.Context.Read(ctx, sessionID, "summary")
 				if err != nil {
 					return nil, err
 				}

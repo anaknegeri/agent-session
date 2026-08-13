@@ -61,6 +61,32 @@ func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (stri
 		s.checkpoints.CreateFromSnapshot(ctx, sessionID, entities.CheckpointKindAuto, "auto-checkpoint (stale)", "", "sync", snapshot)
 	}
 
+	return s.render(ctx, sessionID, depth, snapshot, status, haveStatus)
+}
+
+// Read renders the same context as Get without writing anything: no file-change
+// sync and no auto-checkpoint.
+//
+// It exists because "reads the session" and "records that it was read" are
+// separate promises. A client that gates tool calls on the MCP readOnly hint —
+// Codex under `approval: never` does — must be able to trust that hint, so a tool
+// annotated read-only has to route here rather than through Get.
+func (s *ContextService) Read(ctx context.Context, sessionID, depth string) (string, error) {
+	status, haveStatus := s.gitStatus(ctx, sessionID)
+	snapshot, err := s.checkpoints.BuildSnapshotWith(ctx, sessionID, status, haveStatus)
+	if err != nil {
+		return "", err
+	}
+	return s.render(ctx, sessionID, depth, snapshot, status, haveStatus)
+}
+
+func (s *ContextService) render(
+	ctx context.Context,
+	sessionID, depth string,
+	snapshot *entities.Snapshot,
+	status ports.WorkspaceStatus,
+	haveStatus bool,
+) (string, error) {
 	renderBudget := s.budget
 	if depth == ContextDepthFull {
 		renderBudget = ports.ContextBudget{}
