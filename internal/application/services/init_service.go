@@ -47,75 +47,79 @@ func (s *InitService) Init(ctx context.Context, dir, agent string) (*InitResult,
 		}
 	}
 
-	project, err := s.store.Projects().GetByPath(ctx, dir)
-	if err != nil && !isNotFound(err) {
-		return nil, err
-	}
-	if isNotFound(err) {
-		project = &entities.Project{
-			ID:   ids.New("proj"),
-			Name: projectName,
-			Path: dir,
+	// Everything from here reads the store before writing to it, so it runs as one
+	// transaction: two agents running init at once would otherwise both see no
+	// active session and both create one, and a failure part-way would leave a
+	// session with no agent session and no session.started to explain it.
+	var result *InitResult
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		project, err := st.Projects().GetByPath(ctx, dir)
+		if err != nil && !isNotFound(err) {
+			return err
 		}
-		if err := s.store.Projects().Create(ctx, project); err != nil {
-			return nil, err
+		if isNotFound(err) {
+			project = &entities.Project{
+				ID:   ids.New("proj"),
+				Name: projectName,
+				Path: dir,
+			}
+			if err := st.Projects().Create(ctx, project); err != nil {
+				return err
+			}
 		}
-	}
 
-	active, err := s.store.Sessions().GetActive(ctx, project.ID)
-	if err != nil && !isNotFound(err) {
-		return nil, err
-	}
-	if active != nil {
-		return &InitResult{Project: project, Session: active, IsGit: isGit}, nil
-	}
+		active, err := st.Sessions().GetActive(ctx, project.ID)
+		if err != nil && !isNotFound(err) {
+			return err
+		}
+		if active != nil {
+			result = &InitResult{Project: project, Session: active, IsGit: isGit}
+			return nil
+		}
 
-	session := &entities.Session{
-		ID:        ids.New("sess"),
-		ProjectID: project.ID,
-		Title:     "",
-		Status:    entities.SessionStatusActive,
-		Branch:    workspace.Branch,
-		Commit:    workspace.Commit,
-		Dirty:     workspace.Dirty,
-		LastAgent: agent,
-	}
-	if err := s.store.Sessions().Create(ctx, session); err != nil {
-		return nil, err
-	}
+		session := &entities.Session{
+			ID:        ids.New("sess"),
+			ProjectID: project.ID,
+			Title:     "",
+			Status:    entities.SessionStatusActive,
+			Branch:    workspace.Branch,
+			Commit:    workspace.Commit,
+			Dirty:     workspace.Dirty,
+			LastAgent: agent,
+		}
+		if err := st.Sessions().Create(ctx, session); err != nil {
+			return err
+		}
 
-	if err := s.openAgentSession(ctx, session.ID, agent); err != nil {
-		return nil, err
-	}
+		if err := st.AgentSessions().Create(ctx, &entities.AgentSession{
+			ID:        ids.New("asess"),
+			SessionID: session.ID,
+			Agent:     agent,
+		}); err != nil {
+			return err
+		}
 
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: session.ID,
-		Agent:     agent,
-		Type:      entities.EventSessionStarted,
+		if err := st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: session.ID,
+			Agent:     agent,
+			Type:      entities.EventSessionStarted,
+		}); err != nil {
+			return err
+		}
+
+		s.logger.Info("session started",
+			"session_id", session.ID,
+			"project", project.Name,
+			"agent", agent,
+		)
+		result = &InitResult{Project: project, Session: session, IsGit: isGit}
+		return nil
 	}); err != nil {
 		return nil, err
 	}
 
-	s.logger.Info("session started",
-		"session_id", session.ID,
-		"project", project.Name,
-		"agent", agent,
-	)
-
-	return &InitResult{Project: project, Session: session, IsGit: isGit}, nil
-}
-
-func (s *InitService) openAgentSession(ctx context.Context, sessionID, agent string) error {
-	agentSession := &entities.AgentSession{
-		ID:        ids.New("asess"),
-		SessionID: sessionID,
-		Agent:     agent,
-	}
-	if err := s.store.AgentSessions().Create(ctx, agentSession); err != nil {
-		return err
-	}
-	return nil
+	return result, nil
 }
 
 func isNotFound(err error) bool {

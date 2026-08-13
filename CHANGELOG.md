@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   hooks are installed.
 - `doctor` resolves the Codex config through `$CODEX_HOME` like the adapter does,
   instead of assuming `~/.codex`.
+- **`context.get` reads git once instead of three times.** It already fetched the
+  workspace status for the file sync and the staleness check, then `BuildSnapshot`
+  fetched it again, and a stale session's auto-checkpoint built a third snapshot with
+  a third fetch. The status is now threaded through `BuildSnapshotWith`, and the
+  auto-checkpoint stores the snapshot that was already built — which also means the
+  checkpoint and the rendered context describe the same working tree rather than two
+  reads a moment apart.
 - **The CLI no longer prints slog records over its own output.** Commands wrote
   human-readable output on stdout while the application logger wrote `level=INFO`
   lines for the same actions on stderr, so `handoff` and `checkpoint` came back with
@@ -52,6 +59,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `handoff.created`) now each commit as a single transaction. Handoff also builds
   its snapshot once instead of twice, so git is not re-read while the write lock is
   held.
+- **The rest of the record-plus-event writes are atomic too.** `init` (project,
+  session, agent session, `session.started`), `task.create` (task, the session's
+  `current_task_id` and title, `task.created`), `task.update`, `decision.create`,
+  `blocker.create` and the artifact offload for oversized event payloads each
+  commit as one transaction. Previously any of them could leave the record without
+  its event — or, in `init`'s case, a session that `resume` would find and report as
+  already being worked on. `init` reads the project and the active session inside
+  that transaction, so two agents initialising at once no longer both create one.
 - README claimed 6 MCP resources; the server exposes 7 (`resources/list` on 0.1.6).
 
 ## [0.1.6] — 2026-08-12

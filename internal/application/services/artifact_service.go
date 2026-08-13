@@ -42,25 +42,41 @@ func (s *ArtifactService) Store(ctx context.Context, sessionID, kind, path, cont
 
 // AppendEvent records a canonical event. Payloads larger than
 // LargePayloadThreshold are stored as artifacts and referenced by ID.
+//
+// The offloaded artifact and the event referencing it commit together, so a
+// failed append cannot leave a stored payload nothing points at.
 func (s *ArtifactService) AppendEvent(ctx context.Context, sessionID, agent, eventType, payload string) error {
 	if !entities.IsCanonicalEventType(eventType) {
 		return domainerr.ErrInvalidEventType
 	}
-	ref := payload
-	if len(payload) > LargePayloadThreshold {
-		artifactID, err := s.Store(ctx, sessionID, artifactKind(eventType), "", payload)
+	if len(payload) <= LargePayloadThreshold {
+		return s.appendEvent(ctx, s.store, sessionID, agent, eventType, payload)
+	}
+	return s.store.Tx(ctx, func(st ports.Store) error {
+		artifactID, err := s.withStore(st).Store(ctx, sessionID, artifactKind(eventType), "", payload)
 		if err != nil {
 			return err
 		}
-		ref = fmt.Sprintf(`{"artifact_id":"%s"}`, artifactID)
-	}
-	return s.store.Events().Append(ctx, &entities.SessionEvent{
+		return s.appendEvent(ctx, st, sessionID, agent, eventType, fmt.Sprintf(`{"artifact_id":"%s"}`, artifactID))
+	})
+}
+
+func (s *ArtifactService) appendEvent(ctx context.Context, st ports.Store, sessionID, agent, eventType, payload string) error {
+	return st.Events().Append(ctx, &entities.SessionEvent{
 		ID:        ids.New("evt"),
 		SessionID: sessionID,
 		Agent:     agent,
 		Type:      eventType,
-		Payload:   ref,
+		Payload:   payload,
 	})
+}
+
+// withStore returns a copy bound to st, so the artifact is written inside a
+// transaction the caller has already opened.
+func (s *ArtifactService) withStore(st ports.Store) *ArtifactService {
+	scoped := *s
+	scoped.store = st
+	return &scoped
 }
 
 func artifactKind(eventType string) string {

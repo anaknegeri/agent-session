@@ -41,19 +41,24 @@ func NewContextService(
 // Get renders the session context with progressive loading.
 // Auto-syncs file changes and auto-checkpoints when stale before rendering.
 func (s *ContextService) Get(ctx context.Context, sessionID, depth string) (string, error) {
-	// Fetch git status once and thread it through sync/staleness/nudges below —
-	// each used to shell out to git separately, tripling the cost of every call.
+	// Fetch git status once and thread it through sync/staleness/snapshot/nudges
+	// below — each used to shell out to git separately, so a single context.get on
+	// a stale session ran git three times over.
 	status, haveStatus := s.gitStatus(ctx, sessionID)
 	if haveStatus && s.sync != nil {
 		s.sync.SyncFileChanges(ctx, sessionID, "sync", status)
-		if s.sync.IsStale(ctx, sessionID, status) {
-			s.checkpoints.CreateKind(ctx, sessionID, entities.CheckpointKindAuto, "auto-checkpoint (stale)", "", "sync")
-		}
 	}
 
-	snapshot, err := s.checkpoints.BuildSnapshot(ctx, sessionID)
+	snapshot, err := s.checkpoints.BuildSnapshotWith(ctx, sessionID, status, haveStatus)
 	if err != nil {
 		return "", err
+	}
+
+	// The auto-checkpoint stores this snapshot rather than building its own. It has
+	// to happen before the nudges are added: those are advice for whoever is reading
+	// now, not state worth preserving.
+	if haveStatus && s.sync != nil && s.sync.IsStale(ctx, sessionID, status) {
+		s.checkpoints.CreateFromSnapshot(ctx, sessionID, entities.CheckpointKindAuto, "auto-checkpoint (stale)", "", "sync", snapshot)
 	}
 
 	renderBudget := s.budget

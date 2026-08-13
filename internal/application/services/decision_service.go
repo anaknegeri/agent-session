@@ -26,15 +26,20 @@ func (s *DecisionService) Create(ctx context.Context, sessionID, decision, reaso
 		Reason:    reason,
 		Agent:     agent,
 	}
-	if err := s.store.Decisions().Create(ctx, d); err != nil {
-		return nil, err
-	}
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     agent,
-		Type:      entities.EventDecisionCreated,
-		Payload:   `{"decision_id":"` + d.ID + `"}`,
+	// The decision and the event pointing at it commit together: an agent reading
+	// the timeline follows decision_id and must find the row, and a decision no
+	// event announces never shows up in the log.
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		if err := st.Decisions().Create(ctx, d); err != nil {
+			return err
+		}
+		return st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: sessionID,
+			Agent:     agent,
+			Type:      entities.EventDecisionCreated,
+			Payload:   `{"decision_id":"` + d.ID + `"}`,
+		})
 	}); err != nil {
 		return nil, err
 	}
@@ -53,15 +58,17 @@ func (s *DecisionService) CreateBlocker(ctx context.Context, sessionID, descript
 		Status:      entities.BlockerStatusOpen,
 		Agent:       agent,
 	}
-	if err := s.store.Blockers().Create(ctx, b); err != nil {
-		return nil, err
-	}
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     agent,
-		Type:      entities.EventBlockerCreated,
-		Payload:   `{"blocker_id":"` + b.ID + `"}`,
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		if err := st.Blockers().Create(ctx, b); err != nil {
+			return err
+		}
+		return st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: sessionID,
+			Agent:     agent,
+			Type:      entities.EventBlockerCreated,
+			Payload:   `{"blocker_id":"` + b.ID + `"}`,
+		})
 	}); err != nil {
 		return nil, err
 	}

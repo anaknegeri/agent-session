@@ -111,6 +111,17 @@ func (s *CheckpointService) withStore(st ports.Store) *CheckpointService {
 
 // BuildSnapshot assembles the canonical state from stores and git.
 func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string) (*entities.Snapshot, error) {
+	return s.BuildSnapshotWith(ctx, sessionID, ports.WorkspaceStatus{}, false)
+}
+
+// BuildSnapshotWith assembles the snapshot from a workspace status the caller has
+// already read. haveStatus false means "read git yourself", so callers without one
+// keep the plain BuildSnapshot behaviour; handing one in is how context.get avoids
+// shelling out to git again for state it is already holding.
+//
+// The status is passed by value and only read here, so the snapshot records what
+// the caller saw rather than whatever the working tree looks like a moment later.
+func (s *CheckpointService) BuildSnapshotWith(ctx context.Context, sessionID string, status ports.WorkspaceStatus, haveStatus bool) (*entities.Snapshot, error) {
 	session, err := s.store.Sessions().GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -121,13 +132,18 @@ func (s *CheckpointService) BuildSnapshot(ctx context.Context, sessionID string)
 	}
 
 	workspace := ports.WorkspaceStatus{Repository: project.Name}
-	if s.git != nil {
+	switch {
+	case haveStatus:
+		workspace = status
+	case s.git != nil:
 		if st, gerr := s.git.Status(ctx, project.Path); gerr == nil {
 			workspace = st
-			if st.Repository == "" {
-				workspace.Repository = project.Name
-			}
 		}
+	}
+	// git leaves the repository name empty for a worktree with no remote, so the
+	// project name stands in and the snapshot never names an unnamed repository.
+	if workspace.Repository == "" {
+		workspace.Repository = project.Name
 	}
 
 	task, _ := s.store.Tasks().GetByID(ctx, session.CurrentTaskID)

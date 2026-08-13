@@ -34,26 +34,33 @@ func (s *TaskService) Create(ctx context.Context, sessionID, title, agent string
 		Title:     title,
 		Status:    entities.TaskStatusInProgress,
 	}
-	if err := s.store.Tasks().Create(ctx, task); err != nil {
-		return nil, err
-	}
-	if err := s.setCurrentTask(ctx, sessionID, task.ID); err != nil {
-		return nil, err
-	}
-	if session, err := s.store.Sessions().GetByID(ctx, sessionID); err == nil {
+	// The task, the session pointing at it as current and the task.created event
+	// are one change: a session whose current_task_id names a row that was never
+	// written sends the next agent looking for work that does not exist.
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		if err := st.Tasks().Create(ctx, task); err != nil {
+			return err
+		}
+		session, err := st.Sessions().GetByID(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		session.CurrentTaskID = task.ID
+		// An untitled session takes the name of its first task, so `session.get`
+		// shows what the work is about instead of an empty title.
 		if session.Title == "" {
 			session.Title = title
-			if err := s.store.Sessions().Update(ctx, session); err != nil {
-				return nil, err
-			}
 		}
-	}
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     agent,
-		Type:      entities.EventTaskCreated,
-		Payload:   `{"task_id":"` + task.ID + `"}`,
+		if err := st.Sessions().Update(ctx, session); err != nil {
+			return err
+		}
+		return st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: sessionID,
+			Agent:     agent,
+			Type:      entities.EventTaskCreated,
+			Payload:   `{"task_id":"` + task.ID + `"}`,
+		})
 	}); err != nil {
 		return nil, err
 	}
@@ -73,15 +80,19 @@ func (s *TaskService) Update(ctx context.Context, taskID, title, status, agent s
 	if status != "" {
 		task.Status = status
 	}
-	if err := s.store.Tasks().Update(ctx, task); err != nil {
-		return nil, err
-	}
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: task.SessionID,
-		Agent:     agent,
-		Type:      entities.EventTaskUpdated,
-		Payload:   `{"task_id":"` + task.ID + `","status":"` + task.Status + `"}`,
+	// The event carries the status it moved to, so it has to be the status that was
+	// actually stored.
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		if err := st.Tasks().Update(ctx, task); err != nil {
+			return err
+		}
+		return st.Events().Append(ctx, &entities.SessionEvent{
+			ID:        ids.New("evt"),
+			SessionID: task.SessionID,
+			Agent:     agent,
+			Type:      entities.EventTaskUpdated,
+			Payload:   `{"task_id":"` + task.ID + `","status":"` + task.Status + `"}`,
+		})
 	}); err != nil {
 		return nil, err
 	}
@@ -98,13 +109,4 @@ func (s *TaskService) GetCurrent(ctx context.Context, sessionID string) (*entiti
 
 func (s *TaskService) List(ctx context.Context, sessionID string) ([]*entities.Task, error) {
 	return s.store.Tasks().ListBySession(ctx, sessionID)
-}
-
-func (s *TaskService) setCurrentTask(ctx context.Context, sessionID, taskID string) error {
-	session, err := s.store.Sessions().GetByID(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-	session.CurrentTaskID = taskID
-	return s.store.Sessions().Update(ctx, session)
 }

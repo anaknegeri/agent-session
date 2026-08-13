@@ -130,6 +130,95 @@ func TestStartRollsBackWhenSupersedeBookkeepingFails(t *testing.T) {
 	}
 }
 
+// TestInitRollsBackWhenEventFails verifies a failed init leaves no session
+// behind: one that exists without session.started, or with no agent session, is
+// worse than none, because resume finds it and reports an agent already working.
+func TestInitRollsBackWhenEventFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	broken := brokenApp(t, f, entities.EventSessionStarted)
+	if _, err := broken.Init.Init(ctx, f.dir, "claude"); !errors.Is(err, errInjected) {
+		t.Fatalf("expected the injected failure to surface, got %v", err)
+	}
+
+	project, err := f.app.Store.Projects().GetByPath(ctx, f.dir)
+	if err != nil {
+		// The project row is created in the same transaction, so a rolled-back init
+		// leaves nothing to look up — which is the assertion.
+		return
+	}
+	sessions, err := f.app.Store.Sessions().ListByProject(ctx, project.ID, 50, 0)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("a rolled-back init left %d sessions behind", len(sessions))
+	}
+}
+
+// TestTaskCreateRollsBackWhenEventFails verifies the session never points at a
+// current task that was not written.
+func TestTaskCreateRollsBackWhenEventFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	initRes, err := f.app.Init.Init(ctx, f.dir, "claude")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	session := initRes.Session
+
+	broken := brokenApp(t, f, entities.EventTaskCreated)
+	if _, err := broken.Task.Create(ctx, session.ID, "wire the port", "claude"); !errors.Is(err, errInjected) {
+		t.Fatalf("expected the injected failure to surface, got %v", err)
+	}
+
+	current, err := f.app.Store.Sessions().GetByID(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if current.CurrentTaskID != "" {
+		t.Errorf("current_task_id is %q after a failed task create, want empty", current.CurrentTaskID)
+	}
+	if current.Title != "" {
+		t.Errorf("session title is %q after a failed task create, want empty", current.Title)
+	}
+	tasks, err := f.app.Store.Tasks().ListBySession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Errorf("a rolled-back task create left %d tasks behind", len(tasks))
+	}
+}
+
+// TestDecisionRollsBackWhenEventFails verifies a decision is never stored
+// without the event that puts it on the timeline.
+func TestDecisionRollsBackWhenEventFails(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	initRes, err := f.app.Init.Init(ctx, f.dir, "claude")
+	if err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	session := initRes.Session
+
+	broken := brokenApp(t, f, entities.EventDecisionCreated)
+	if _, err := broken.Decision.Create(ctx, session.ID, "use Store.Tx", "atomicity", "claude"); !errors.Is(err, errInjected) {
+		t.Fatalf("expected the injected failure to surface, got %v", err)
+	}
+
+	decisions, err := f.app.Store.Decisions().ListBySession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("list decisions: %v", err)
+	}
+	if len(decisions) != 0 {
+		t.Errorf("a rolled-back decision left %d rows behind", len(decisions))
+	}
+}
+
 // TestCheckpointRollsBackWhenEventFails verifies a checkpoint is never stored
 // without the checkpoint.created event that makes it visible to the timeline.
 func TestCheckpointRollsBackWhenEventFails(t *testing.T) {
