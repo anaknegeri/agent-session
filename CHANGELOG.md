@@ -5,7 +5,7 @@ All notable changes to Agent Session are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.8] — 2026-08-13
 
 ### Fixed
 - **Re-running setup left Claude Code pointing at a binary that moved.**
@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   now reads the registered command and re-registers when it differs, the way every
   other adapter rewrites `command` on re-run, and `doctor` fails when the registered
   path is not there instead of only checking that an entry exists.
+
+  Present since 0.1.4, so 0.1.4 through 0.1.7 are affected. It only bites when the
+  binary's *path* changes — Homebrew to `~/.local/bin`, `go install` to a different
+  GOPATH, a manual move — never on `self-update`, which replaces the file in place,
+  and never on a first install. On 0.1.7 and earlier, repair it with
+  `claude mcp remove agent-session -s user && agent-session init --only claude`.
 
 ## [0.1.7] — 2026-08-13
 
