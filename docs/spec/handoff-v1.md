@@ -56,7 +56,7 @@ Agent-authored values are flattened to a single line, exactly as in
 
 ## Supported targets
 
-`claude`, `codex`, `opencode`, `pi`.
+`claude`, `codex`, `opencode`, `pi`, `omp`.
 
 An unsupported target is **refused**, not rendered. Producing a handoff document
 nobody will read loses the state instead of reporting the mistake.

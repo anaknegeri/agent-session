@@ -22,6 +22,13 @@ func (s *WorkspaceService) DetectGit(ctx context.Context, dir string) (bool, err
 	return s.git.Detect(ctx, dir)
 }
 
-func (s *WorkspaceService) Diff(ctx context.Context, dir string) (string, error) {
-	return s.git.Diff(ctx, dir)
+// Diff returns the git diff at the requested scope. An unrecognised scope falls
+// back to the full diff: only "stat" narrows the output, so a typo must not
+// silently hand back less than the caller asked for.
+func (s *WorkspaceService) Diff(ctx context.Context, dir, scope string) (string, error) {
+	gitScope := ports.DiffScopeFull
+	if scope == string(ports.DiffScopeStat) {
+		gitScope = ports.DiffScopeStat
+	}
+	return s.git.Diff(ctx, dir, gitScope)
 }

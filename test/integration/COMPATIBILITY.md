@@ -17,6 +17,7 @@ breaks.
 | Cursor | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via rules only | 🟡 |
 | Cline | 🟡 | 🟡 | 🟡 | ⚠ | ⚠ via rules only | — |
 | pi | ❌ none shipped | ✅ via CLI | ✅ | 🟡 | ✅ extension lifecycle | 🟡 |
+| omp (oh-my-pi) | 🟡 | ✅ via extension | ✅ | 🟡 | ✅ extension lifecycle | 🟡 |
 
 ## Legend
 
@@ -40,6 +41,7 @@ breaks.
 | `TestCrossAgentHandoffSmoke` | Claude Code → Codex | a marker task Claude records through MCP survives `handoff codex` in the same session, and Codex — a separate CLI, separate process, its own MCP server — reports that task back | yes |
 | `TestReadOnlyToolsDoNotWrite` | any MCP client | every tool advertising `readOnlyHint` leaves the session fingerprint (session, last agent, current task, event/checkpoint/task/decision/memory counts) untouched | no |
 | `TestPiSmoke` | pi | `init --project --only pi` writes `.pi/extensions/agent-session.ts`, `.pi/skills/agent-session/SKILL.md` and `.pi/prompts/*.md`; a real `pi` run then sets `last_agent` to `pi` (session_start), injects the rendered context into the pi session as a `customType: "agent-session"` entry (before_agent_start), and leaves a checkpoint labelled `auto` (session_shutdown) | yes |
+| `TestOmpSmoke` | omp | `init --project --only omp` writes `.omp/mcp.json` (stdio, absolute binary, `AGENT_SESSION_AGENT=omp`), `.omp/extensions/agent-session.ts`, `.omp/skills/agent-session/SKILL.md` and `.omp/commands/*.md`; a real `omp` run then sets `last_agent` to `omp` (session_start), injects the rendered context as a `customType: "agent-session"` entry (before_agent_start), and leaves a checkpoint labelled `auto` (session_shutdown) | yes |
 
 ### Attribution caveat for the Claude smoke test
 
@@ -167,8 +169,27 @@ looking for `.agent/` before doing anything.
   their agent. `agent-session init` prints the one-time approval step instead.
   What remains unverified is the post-approval run.
 - **Cursor and Cline.** Wiring is generated and manually checked; no smoke test.
-- **pi compaction.** `session_before_compact` checkpoints through the same helper
-  as `session_shutdown`, which is covered, but no test reaches a real compaction.
+- **pi and omp compaction.** `session_before_compact` checkpoints through the same
+  helper as `session_shutdown`, which is covered, but no test reaches a real
+  compaction.
+- **omp MCP tool calls.** `TestOmpSmoke` asserts the registration in
+  `.omp/mcp.json`, not a tool call: reaching one needs a provider. `/mcp list`
+  inside a wired project reports `agent-session ● connected [stdio]` under
+  `Project level`, which was checked by hand against omp v17.2.15.
+- **omp named profiles.** `UserRoot` follows `PI_CODING_AGENT_DIR`, then
+  `OMP_PROFILE`/`PI_PROFILE` (unit-tested), so an exported profile is wired where
+  omp reads it. A profile passed only as `omp --profile x` cannot be seen at
+  install time: wire that project with `--project`, or export the variable once.
+- **omp subagent sessions.** The lifecycle extension is loaded into every `task`
+  subagent runner too (omp preloads the parent's extension paths), so
+  `session_start` is guarded by a module-level flag — one resume per omp process.
+  The mechanism is unit-asserted and the Bun module-cache assumption behind it was
+  checked by hand (one instance per `?mtime`-tagged specifier); no test spawns a
+  real subagent, because that needs a provider.
+- **omp `session_stop`.** The per-turn checkpoint is not exercised by
+  `TestOmpSmoke`: the smoke run never settles a turn (its provider call fails), so
+  only `session_start`, `before_agent_start` and `session_shutdown` are covered
+  there. Reaching `session_stop` needs a model.
 
 ## How to run the smoke tests
 

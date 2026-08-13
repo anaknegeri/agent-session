@@ -15,6 +15,8 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/omp"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/pi"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
 	"github.com/anaknegeri/agent-session/pkg/logger"
 	"github.com/anaknegeri/agent-session/pkg/port"
@@ -89,6 +91,13 @@ func checkUserScope() bool {
 			continue
 		}
 		ok = false
+		// A detail that already names its own remedy replaces the generic one:
+		// telling a reader to re-run `init` for a server they disabled in the agent
+		// sends them after a command that deliberately will not re-enable it.
+		if strings.Contains(detail, "run `") {
+			fmt.Printf("✗ %s not wired at user scope: %s\n", a.Name, detail)
+			continue
+		}
 		fmt.Printf("✗ %s not wired at user scope: %s\n  run `agent-session init --only %s`\n", a.Name, detail, a.Name)
 	}
 	reportCodexHookApproval()
@@ -122,12 +131,21 @@ func userScopeWired(home, name string) (bool, string) {
 		return cursorUserScopeWired(home)
 	case "codex":
 		return codexUserScopeWired(home)
+	case "pi":
+		return piUserScopeWired(home)
+	case "omp":
+		return ompUserScopeWired(home)
 	case "cline":
 		return false, ""
 	}
 	return false, "unknown agent"
 }
 
+// claudeUserScopeWired checks both halves of what installClaudeGlobal writes: the
+// lifecycle hooks in ~/.claude/settings.json and the user-scope MCP registration
+// `claude mcp add --scope user` lands in ~/.claude.json. Hooks alone were enough
+// for a ✓, so an install with no agent-session server — no session tools at all —
+// read as healthy.
 func claudeUserScopeWired(home string) (bool, string) {
 	path := filepath.Join(home, ".claude", "settings.json")
 	data, err := os.ReadFile(path)
@@ -140,6 +158,23 @@ func claudeUserScopeWired(home string) (bool, string) {
 	}
 	if !claude.HasAgentSessionHooks(settings) {
 		return false, "no agent-session SessionStart/Stop hooks"
+	}
+	return claudeUserMCPRegistered(home)
+}
+
+func claudeUserMCPRegistered(home string) (bool, string) {
+	path := filepath.Join(home, ".claude.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, "missing ~/.claude.json — no user-scope MCP server"
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return false, "invalid ~/.claude.json"
+	}
+	servers, _ := config["mcpServers"].(map[string]any)
+	if _, ok := servers["agent-session"]; !ok {
+		return false, "no user-scope mcpServers.agent-session entry in ~/.claude.json"
 	}
 	return true, ""
 }
@@ -180,7 +215,9 @@ func cursorUserScopeWired(home string) (bool, string) {
 
 // codexUserScopeWired resolves the config through the adapter rather than
 // assuming ~/.codex, so a reader who moved Codex with CODEX_HOME is not told
-// their working setup is missing.
+// their working setup is missing. It checks the hooks too: they are half of what
+// installCodex writes, and without them resume and checkpoint only happen if the
+// model chooses to call the tools.
 func codexUserScopeWired(home string) (bool, string) {
 	dir, err := codex.ConfigDir()
 	if err != nil {
@@ -191,8 +228,68 @@ func codexUserScopeWired(home string) (bool, string) {
 	if err != nil {
 		return false, fmt.Sprintf("missing %s", path)
 	}
-	if !strings.Contains(string(data), "[mcp_servers.agent-session]") {
+	// `codex mcp add` writes the bare header, but a hand-edited config may quote
+	// the server name; both declare the same table.
+	if !strings.Contains(string(data), "[mcp_servers.agent-session]") &&
+		!strings.Contains(string(data), `[mcp_servers."agent-session"]`) {
 		return false, "no [mcp_servers.agent-session] section"
+	}
+	hooks := filepath.Join(dir, "hooks.json")
+	installed, err := codex.NewAdapter().HooksInstalled()
+	if err != nil {
+		return false, fmt.Sprintf("cannot read %s: %v", hooks, err)
+	}
+	if !installed {
+		return false, fmt.Sprintf("no agent-session SessionStart/Stop hooks in %s", hooks)
+	}
+	return true, ""
+}
+
+// piUserScopeWired has no MCP entry to look for: pi ships no MCP client, so the
+// lifecycle extension is the whole wiring.
+func piUserScopeWired(home string) (bool, string) {
+	path := pi.ExtensionPath(pi.UserRoot(home))
+	if _, err := os.Stat(path); err != nil {
+		return false, fmt.Sprintf("missing %s", path)
+	}
+	return true, ""
+}
+
+// ompUserScopeWired resolves the same agent directory omp does (honoring
+// PI_CODING_AGENT_DIR and OMP_PROFILE/PI_PROFILE), then checks that the server is
+// both registered and *reachable*: omp's `disabledServers` denylist and a
+// `/mcp disable`-written `enabled: false` each hide a registered server
+// completely, which is exactly the state a health check exists to catch.
+func ompUserScopeWired(home string) (bool, string) {
+	root := omp.UserRoot(home)
+	path := omp.MCPPath(root)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Sprintf("missing %s", path)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(data, &config); err != nil {
+		return false, fmt.Sprintf("invalid %s", path)
+	}
+	mcpServers, _ := config["mcpServers"].(map[string]any)
+	entry, ok := mcpServers["agent-session"].(map[string]any)
+	if !ok {
+		if _, present := mcpServers["agent-session"]; !present {
+			return false, "no mcpServers.agent-session entry"
+		}
+		return false, "mcpServers.agent-session is not an object"
+	}
+	if enabled, set := entry["enabled"].(bool); set && !enabled {
+		return false, "mcpServers.agent-session has enabled: false — run `/mcp enable agent-session` in omp"
+	}
+	disabled, _ := config["disabledServers"].([]any)
+	for _, name := range disabled {
+		if s, _ := name.(string); s == "agent-session" {
+			return false, "agent-session is in disabledServers — run `/mcp enable agent-session` in omp"
+		}
+	}
+	if _, err := os.Stat(omp.ExtensionPath(root)); err != nil {
+		return false, "MCP server registered but no lifecycle extension (no automatic resume/checkpoint)"
 	}
 	return true, ""
 }

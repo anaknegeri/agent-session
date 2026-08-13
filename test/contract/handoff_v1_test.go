@@ -2,13 +2,14 @@ package contract_test
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
-	ctxrender "github.com/anaknegeri/agent-session/internal/infrastructure/context"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	ctxrender "github.com/anaknegeri/agent-session/internal/infrastructure/context"
 )
 
 // handoffLabelsV1 is the ordered label vocabulary of the handoff document
@@ -29,7 +30,7 @@ var handoffLabelsV1 = []string{
 
 // handoffTargetsV1 is the set of agents `handoff` accepts. Asking for an
 // unsupported one has to fail rather than render a document for nobody.
-var handoffTargetsV1 = []string{"claude", "codex", "opencode", "pi"}
+var handoffTargetsV1 = []string{"claude", "codex", "omp", "opencode", "pi"}
 
 func TestHandoffDocumentV1(t *testing.T) {
 	renderer := ctxrender.NewRenderer()
@@ -83,6 +84,35 @@ func TestHandoffCarriesTrustFramingV1(t *testing.T) {
 	}
 	if strings.Contains(bareText, framing) {
 		t.Error("the framing renders when there are no agent-authored notes to frame")
+	}
+}
+
+// TestHandoffHonoursTheContextBudgetV1: handoff-v1.md promises "the same context
+// budget as context.get applies". The progress list is the one that used to render
+// in full, so a 200-entry list landed unbounded in the next agent's prompt.
+func TestHandoffHonoursTheContextBudgetV1(t *testing.T) {
+	renderer := ctxrender.NewRenderer()
+	snapshot := fullSnapshot()
+	for i := range 40 {
+		snapshot.Progress.Completed = append(snapshot.Progress.Completed,
+			fmt.Sprintf("completed item %d", i))
+	}
+
+	budget := ports.ContextBudget{MaxProgress: 3, MaxItemChars: 200}
+	text, err := renderer.RenderHandoff(snapshot, "codex", budget)
+	if err != nil {
+		t.Fatalf("render handoff: %v", err)
+	}
+
+	items := strings.Count(text, "completed item ")
+	if items > budget.MaxProgress {
+		t.Errorf("the handoff rendered %d progress items, budget says at most %d\n%s",
+			items, budget.MaxProgress, text)
+	}
+	// Dropping items silently is worse than the token cost: the reader has to know
+	// the list is partial, exactly as context.get tells them.
+	if !strings.Contains(text, "… +") {
+		t.Errorf("the handoff dropped progress items without counting them:\n%s", text)
 	}
 }
 

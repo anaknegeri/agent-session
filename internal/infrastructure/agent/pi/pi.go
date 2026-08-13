@@ -24,7 +24,6 @@ package pi
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,7 +45,7 @@ const binPlaceholder = "__AGENT_SESSION_BIN__"
 
 // managedMarker matches the marker in both embedded files, so re-running setup
 // updates our files and never touches one the user wrote or heavily edited.
-const managedMarker = "agent-session:managed"
+const managedMarker = agent.ManagedMarker
 
 // UserRoot is pi's user-scope resource root.
 func UserRoot(home string) string { return filepath.Join(home, ".pi", "agent") }
@@ -54,7 +53,9 @@ func UserRoot(home string) string { return filepath.Join(home, ".pi", "agent") }
 // ProjectRoot is pi's project-scope resource root.
 func ProjectRoot(projectDir string) string { return filepath.Join(projectDir, ".pi") }
 
-func extensionPath(root string) string {
+// ExtensionPath is the lifecycle extension pi loads from a scope root. Exported
+// so `doctor` checks the same path setup writes.
+func ExtensionPath(root string) string {
 	return filepath.Join(root, "extensions", "agent-session.ts")
 }
 
@@ -73,12 +74,12 @@ func renderExtension(bin string) string {
 
 // EnsureExtension writes the lifecycle extension under root.
 func EnsureExtension(root, bin string) error {
-	return writeManaged(extensionPath(root), renderExtension(bin))
+	return agent.WriteManaged(ExtensionPath(root), renderExtension(bin))
 }
 
 // EnsureSkill writes the CLI skill under root.
 func EnsureSkill(root string) error {
-	return writeManaged(filepath.Join(skillDir(root), "SKILL.md"), skillMD)
+	return agent.WriteManaged(filepath.Join(skillDir(root), "SKILL.md"), skillMD)
 }
 
 // EnsurePrompts writes the pi slash commands under root.
@@ -102,10 +103,10 @@ func EnsureResources(root, bin string) error {
 // RemoveResources reverses EnsureResources, leaving files we do not own and any
 // other pi configuration untouched.
 func RemoveResources(root string) error {
-	if err := removeManaged(extensionPath(root)); err != nil {
+	if err := agent.RemoveManaged(ExtensionPath(root)); err != nil {
 		return err
 	}
-	if err := removeManaged(filepath.Join(skillDir(root), "SKILL.md")); err != nil {
+	if err := agent.RemoveManaged(filepath.Join(skillDir(root), "SKILL.md")); err != nil {
 		return err
 	}
 	// The skill lives in a directory of its own, so removing it leaves an empty
@@ -114,38 +115,6 @@ func RemoveResources(root string) error {
 	_ = os.Remove(skillDir(root))
 	if _, err := commands.UninstallSet(PromptsDir(root), Commands()); err != nil {
 		return err
-	}
-	return nil
-}
-
-func writeManaged(path, content string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
-	}
-	if existing, err := os.ReadFile(path); err == nil {
-		if !strings.Contains(string(existing), managedMarker) {
-			return nil
-		}
-		if string(existing) == content {
-			return nil
-		}
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
-func removeManaged(path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	if !strings.Contains(string(data), managedMarker) {
-		return nil
-	}
-	if err := os.Remove(path); err != nil {
-		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	return nil
 }

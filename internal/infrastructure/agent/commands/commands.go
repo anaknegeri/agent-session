@@ -9,6 +9,7 @@
 //	Cursor        .cursor/commands/*.md
 //	Cline         .clinerules/*.md        (project)
 //	pi            .pi/prompts/*.md        (project) | ~/.pi/agent/prompts (user)
+//	omp           .omp/commands/*.md      (project) | ~/.omp/agent/commands (user)
 //
 // pi installs its own command set through InstallSet rather than All(): every
 // universal prompt tells the agent to call MCP tools, and pi has no MCP client.

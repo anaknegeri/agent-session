@@ -75,7 +75,7 @@ func newInitCmd() *cobra.Command {
 					wired++
 				}
 				if wired == 0 {
-					yellow("- no agent CLIs detected (claude, opencode, codex, cursor, pi)\n")
+					yellow("- no agent CLIs detected (claude, opencode, codex, cursor, pi, omp)\n")
 					yellow("  AGENTS.md still covers any agent that reads it. Re-run `init --only <agent>` after installing one.\n")
 				}
 			} else if projectScope {
@@ -87,7 +87,7 @@ func newInitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&only, "only", "", "Only wire one agent: claude | opencode | codex | cursor | cline | pi")
+	cmd.Flags().StringVar(&only, "only", "", "Only wire one agent: claude | opencode | codex | cursor | cline | pi | omp")
 	cmd.Flags().BoolVar(&noAgents, "no-agents", false, "Session layer only, skip agent wiring")
 	cmd.Flags().BoolVar(&projectScope, "project", false, "Write per-project agent config instead of user scope")
 	return cmd
@@ -125,6 +125,12 @@ func installAgentGlobal(bin, name string) {
 			return
 		}
 		green("✓ pi: ~/.pi/agent extension + skill + prompts (CLI, not MCP — pi ships none)\n")
+	case "omp":
+		if err := installOmpGlobal(bin); err != nil {
+			red("✗ omp: %v\n", err)
+			return
+		}
+		green("✓ omp: registered in ~/.omp/agent/mcp.json + extension + skill + commands\n")
 	default:
 		red("✗ unknown agent %q\n", name)
 	}
@@ -144,6 +150,8 @@ func installAgent(dir, bin, name string) {
 		installCline(dir, bin)
 	case "pi":
 		installPi(dir, bin)
+	case "omp":
+		installOmp(dir, bin)
 	default:
 		red("✗ unknown agent %q\n", name)
 	}

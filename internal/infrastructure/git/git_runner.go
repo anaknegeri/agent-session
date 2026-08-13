@@ -135,13 +135,20 @@ func changeStatus(xy string) string {
 	return string(xy[1])
 }
 
-func (r *runner) Diff(ctx context.Context, dir string) (string, error) {
+// Diff returns the working tree against HEAD. `diff HEAD` rather than a bare
+// `diff` so staged changes stay visible; an unborn HEAD has nothing to diff
+// against and yields an empty diff rather than an error.
+func (r *runner) Diff(ctx context.Context, dir string, scope ports.DiffScope) (string, error) {
 	if !r.hasHead(ctx, dir) {
 		return "", nil
 	}
-	out, err := r.run(ctx, dir, "diff", "HEAD")
+	args := []string{"diff", "HEAD"}
+	if scope == ports.DiffScopeStat {
+		args = append(args, "--stat")
+	}
+	out, err := r.run(ctx, dir, args...)
 	if err != nil {
-		return "", fmt.Errorf("git diff HEAD: %w", err)
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
 }

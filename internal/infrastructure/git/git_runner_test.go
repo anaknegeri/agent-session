@@ -64,7 +64,7 @@ func TestDiffStatIncludesStagedChanges(t *testing.T) {
 		t.Fatalf("expected 1 change in status, got %+v", status.Changes)
 	}
 
-	diff, err := r.Diff(ctx, dir)
+	diff, err := r.Diff(ctx, dir, ports.DiffScopeFull)
 	if err != nil {
 		t.Fatalf("Diff: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestDiffStatUnbornHead(t *testing.T) {
 		t.Errorf("untracked status = %q, want %q", c.Status, "??")
 	}
 
-	diff, err := r.Diff(ctx, dir)
+	diff, err := r.Diff(ctx, dir, ports.DiffScopeFull)
 	if err != nil {
 		t.Fatalf("Diff on unborn HEAD should not error: %v", err)
 	}

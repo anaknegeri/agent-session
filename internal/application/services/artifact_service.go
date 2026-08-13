@@ -14,6 +14,13 @@ import (
 // artifacts and referenced instead of inline (PRD §14.3).
 const LargePayloadThreshold = 8 * 1024
 
+// MaxPayloadSize caps a single event payload. Offloading to an artifact bounds
+// what the events table carries but not what the process holds: an agent piping
+// a whole build log or a binary through event.append had the entire string in
+// memory and then again in SQLite. Anything genuinely that large belongs in a
+// file the diff can point at.
+const MaxPayloadSize = 1 << 20
+
 type ArtifactService struct {
 	store ports.Store
 }
@@ -48,6 +55,9 @@ func (s *ArtifactService) Store(ctx context.Context, sessionID, kind, path, cont
 func (s *ArtifactService) AppendEvent(ctx context.Context, sessionID, agent, eventType, payload string) error {
 	if !entities.IsCanonicalEventType(eventType) {
 		return domainerr.ErrInvalidEventType
+	}
+	if len(payload) > MaxPayloadSize {
+		return fmt.Errorf("event payload is %d bytes, over the %d byte limit", len(payload), MaxPayloadSize)
 	}
 	if len(payload) <= LargePayloadThreshold {
 		return s.appendEvent(ctx, s.store, sessionID, agent, eventType, payload)

@@ -20,7 +20,7 @@ func TestEnsureResourcesWritesEverything(t *testing.T) {
 		t.Fatalf("ensure resources: %v", err)
 	}
 
-	ext := read(t, extensionPath(root))
+	ext := read(t, ExtensionPath(root))
 	if !strings.Contains(ext, `"`+bin+`"`) {
 		t.Errorf("the extension does not carry the binary path %q:\n%s", bin, ext)
 	}
@@ -72,11 +72,11 @@ func TestEnsureResourcesIsIdempotent(t *testing.T) {
 	if err := EnsureResources(root, "agent-session"); err != nil {
 		t.Fatalf("first ensure: %v", err)
 	}
-	before := read(t, extensionPath(root))
+	before := read(t, ExtensionPath(root))
 	if err := EnsureResources(root, "agent-session"); err != nil {
 		t.Fatalf("second ensure: %v", err)
 	}
-	if after := read(t, extensionPath(root)); after != before {
+	if after := read(t, ExtensionPath(root)); after != before {
 		t.Error("re-running setup changed the extension")
 	}
 }
@@ -86,24 +86,24 @@ func TestEnsureResourcesIsIdempotent(t *testing.T) {
 func TestEnsureResourcesLeavesForeignFiles(t *testing.T) {
 	root := filepath.Join(t.TempDir(), ".pi")
 	const mine = "// my own extension\n"
-	if err := os.MkdirAll(filepath.Dir(extensionPath(root)), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(ExtensionPath(root)), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(extensionPath(root), []byte(mine), 0o644); err != nil {
+	if err := os.WriteFile(ExtensionPath(root), []byte(mine), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	if err := EnsureResources(root, "agent-session"); err != nil {
 		t.Fatalf("ensure resources: %v", err)
 	}
-	if got := read(t, extensionPath(root)); got != mine {
+	if got := read(t, ExtensionPath(root)); got != mine {
 		t.Errorf("setup overwrote an extension it does not own:\n%s", got)
 	}
 
 	if err := RemoveResources(root); err != nil {
 		t.Fatalf("remove resources: %v", err)
 	}
-	if got := read(t, extensionPath(root)); got != mine {
+	if got := read(t, ExtensionPath(root)); got != mine {
 		t.Error("uninstall removed an extension it does not own")
 	}
 }
@@ -118,7 +118,7 @@ func TestRemoveResources(t *testing.T) {
 	}
 
 	gone := []string{
-		extensionPath(root),
+		ExtensionPath(root),
 		filepath.Join(skillDir(root), "SKILL.md"),
 	}
 	for _, c := range Commands() {

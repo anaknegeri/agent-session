@@ -79,7 +79,7 @@ func TestConcurrentEventsAppend(t *testing.T) {
 			defer wg.Done()
 			app2 := fx.openApp(t)
 			for i := 0; i < perWriter; i++ {
-				if err := app2.Event.Append(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", ""); err != nil {
+				if err := app2.Artifact.AppendEvent(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", ""); err != nil {
 					errs <- fmt.Errorf("writer %d append %d: %w", w, i, err)
 					return
 				}
@@ -206,11 +206,11 @@ func TestMigrationWhileOpen(t *testing.T) {
 	ctx := context.Background()
 
 	app2 := fx.openApp(t) // runs migration on open
-	if err := app2.Event.Append(ctx, fx.sessionID, "claude", "file.changed", ""); err != nil {
+	if err := app2.Artifact.AppendEvent(ctx, fx.sessionID, "claude", "file.changed", ""); err != nil {
 		t.Fatalf("append via second app: %v", err)
 	}
 	app1 := fx.openApp(t)
-	if err := app1.Event.Append(ctx, fx.sessionID, "claude", "file.changed", ""); err != nil {
+	if err := app1.Artifact.AppendEvent(ctx, fx.sessionID, "claude", "file.changed", ""); err != nil {
 		t.Fatalf("append via first app: %v", err)
 	}
 }
@@ -330,7 +330,7 @@ func TestLockContentionUnderLongWrite(t *testing.T) {
 		go func(w int) {
 			defer wg.Done()
 			app := fx.openApp(t)
-			if err := app.Event.Append(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", ""); err != nil {
+			if err := app.Artifact.AppendEvent(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", ""); err != nil {
 				errs <- fmt.Errorf("writer %d blocked out: %w", w, err)
 			}
 		}(w)
@@ -384,7 +384,7 @@ func TestRecoveryAfterInterruptedWrite(t *testing.T) {
 	if len(after) != len(before) {
 		t.Errorf("event count changed across a rolled-back write: %d -> %d", len(before), len(after))
 	}
-	if err := next.Event.Append(ctx, fx.sessionID, "claude", "test.passed", ""); err != nil {
+	if err := next.Artifact.AppendEvent(ctx, fx.sessionID, "claude", "test.passed", ""); err != nil {
 		t.Errorf("store not writable after recovery: %v", err)
 	}
 }

@@ -64,6 +64,10 @@ Field notes:
 - `version` — the Checkpoint Schema version this snapshot follows. **Absent means
   v1**: the field was added when the schema was specified, not when it changed, so
   checkpoints written before it are readable unchanged.
+- `progress.tasks` — always present in snapshots written by this schema, but
+  **absent in snapshots written before the field existed**. A reader walking an old
+  checkpoint treats that like `version` being absent: the rest of the shape is
+  still v1.
 - `tests.status` — `passed`, `failed` or `unknown`, derived from the most recent
   `test.*` event; empty when the event log could not be read. Both `unknown` and
   empty render as no Tests section at all, rather than as a claim about the test

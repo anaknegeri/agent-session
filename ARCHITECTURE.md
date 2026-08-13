@@ -302,7 +302,8 @@ Storage dibuat mengikuti pola `Store` interface + `SQLiteStore` (PostgresStore b
 | `SessionService` | create/resume/status/handoff/lifecycle, atur `last_agent`, buka+tutup `agent_sessions` | `session.get`, `session.resume`, CLI `start/resume/status` |
 | `CheckpointService` | buat snapshot canonical , simpan `checkpoints`, auto-checkpoint, restore | `session.checkpoint`, CLI `checkpoint` |
 | `MemoryService` | put/get/search/delete knowledge (FTS5) + promote non-LLM dari decision/blocker/task | `memory.*`, CLI `memory` |
-| `EventService` | append `session_events` (canonical event §14.3), query recent | `event.append`, CLI `history` |
+| `EventService` | query `session_events` (canonical event §14.3) | CLI `history` |
+| `ArtifactService` | satu-satunya jalan append event: validasi tipe canonical, batasi ukuran payload, offload payload besar ke `artifacts` | `event.append`, `session.record`, CLI `event add` |
 | `TaskService` | create/update task, set `current_task_id` | `task.get`, `task.update` |
 | `DecisionService` | list/create decision + blocker | `decision.list`, `decision.create` |
 | `ContextService` | render context.md (progressive loading §25) + handoff text (§24) | `context.get`, `context.update`, CLI `context` |

@@ -172,3 +172,150 @@ func TestUninstallRemovesOnlyOurHooks(t *testing.T) {
 		t.Errorf("uninstall removed another tool's hook: %q", start)
 	}
 }
+
+// TestUninstallWithNothingInstalledWritesNothing is the reproduction of two
+// uninstall defects: uninstalling on a machine where hooks were never installed
+// *created* hooks.json holding `{"hooks":{}}`, and a missing $CODEX_HOME made
+// uninstall fail outright, so `plugin uninstall codex` could not be re-run.
+func TestUninstallWithNothingInstalledWritesNothing(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "codex")
+	t.Setenv("CODEX_HOME", home)
+
+	a := NewAdapter()
+	for i := range 2 {
+		if err := a.Uninstall(context.Background()); err != nil {
+			t.Fatalf("uninstall %d: %v", i, err)
+		}
+	}
+	if _, err := os.Stat(home); !os.IsNotExist(err) {
+		t.Errorf("uninstall created %s", home)
+	}
+}
+
+// TestUninstallLeavesNoEmptyHooksFile verifies install/uninstall is a round trip:
+// a hooks.json that held only our entries is removed rather than left behind
+// holding an empty object.
+func TestUninstallLeavesNoEmptyHooksFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	a := NewAdapter()
+	if err := a.Install(context.Background()); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	for i := range 2 {
+		if err := a.Uninstall(context.Background()); err != nil {
+			t.Fatalf("uninstall %d: %v", i, err)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(home, "hooks.json")); err == nil {
+		t.Errorf("hooks.json was left behind after uninstall: %s", data)
+	}
+}
+
+// TestUninstallKeepsAForeignOnlyHooksFileByteIdentical verifies we do not rewrite
+// (and so reformat) a hooks.json that has nothing of ours in it.
+func TestUninstallKeepsAForeignOnlyHooksFileByteIdentical(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	path := filepath.Join(home, "hooks.json")
+	const existing = "{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\",\"command\":\"/other/start.sh\"}]}]}}"
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewAdapter().Uninstall(context.Background()); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("uninstall removed another tool's hooks.json: %v", err)
+	}
+	if string(data) != existing {
+		t.Errorf("uninstall rewrote a hooks.json it had no entry in:\n%s", data)
+	}
+}
+
+// TestUninstallRemovesMCPSubTables is the reproduction of the orphan sub-table:
+// [mcp_servers.agent-session.env] starts with `[`, which used to end the skip, so
+// uninstall left a table re-declaring the server with no command in it.
+func TestUninstallRemovesMCPSubTables(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	const config = `model = "gpt-5"
+
+[mcp_servers.other]
+command = "other-mcp"
+args = ["mcp"]
+
+[mcp_servers.agent-session]
+command = "agent-session"
+args = ["mcp"]
+
+[mcp_servers.agent-session.env]
+AGENT_SESSION_AGENT = "codex"
+
+[projects."/home/me/app"]
+trust_level = "trusted"
+`
+	if err := os.WriteFile(path, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewAdapter().Uninstall(context.Background()); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	const want = `model = "gpt-5"
+
+[mcp_servers.other]
+command = "other-mcp"
+args = ["mcp"]
+
+[projects."/home/me/app"]
+trust_level = "trusted"
+`
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	if string(data) != want {
+		t.Errorf("config.toml after uninstall:\n%s\nwant:\n%s", data, want)
+	}
+}
+
+// TestUninstallRemovesQuotedMCPSection covers the other spelling of the same
+// table, and pins the prefix boundary: agent-session-old is someone else's server.
+func TestUninstallRemovesQuotedMCPSection(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	const config = `[mcp_servers."agent-session"]
+command = "agent-session"
+
+[mcp_servers."agent-session".env]
+AGENT_SESSION_AGENT = "codex"
+
+[mcp_servers.agent-session-old]
+command = "legacy"
+`
+	if err := os.WriteFile(path, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := NewAdapter().Uninstall(context.Background()); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	const want = `[mcp_servers.agent-session-old]
+command = "legacy"
+`
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	if string(data) != want {
+		t.Errorf("config.toml after uninstall:\n%s\nwant:\n%s", data, want)
+	}
+}

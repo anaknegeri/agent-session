@@ -1,18 +1,19 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/claude"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cline"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/commands"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cursor"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/omp"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/pi"
 )
@@ -214,6 +215,44 @@ func uninstallPiGlobal() error {
 	return pi.RemoveResources(pi.UserRoot(home))
 }
 
+// installOmp wires omp at project scope: .omp/mcp.json + extension + skill +
+// commands. Unlike pi, omp needs no per-project approval — project resources load
+// on the next session, so the files are live as soon as they are written.
+func installOmp(dir, bin string) {
+	a := omp.NewAdapter(dir)
+	if err := a.Configure(ctx(), bin); err != nil {
+		red("✗ omp: %v\n", err)
+		return
+	}
+	if err := a.Install(ctx()); err != nil {
+		red("✗ omp: %v\n", err)
+		return
+	}
+	green("✓ omp: .omp/mcp.json + .omp/extensions/agent-session.ts + skill + commands\n")
+}
+
+// installOmpGlobal wires omp at user scope (~/.omp/agent), the default profile's
+// agent directory. The extension guards itself by looking for .agent/ before
+// doing anything, so it stays silent in projects that do not use agent-session.
+// A named profile (`omp --profile x`) reads ~/.omp/profiles/x/agent instead and
+// is not covered by this.
+func installOmpGlobal(bin string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	return omp.EnsureResources(omp.UserRoot(home), bin)
+}
+
+// uninstallOmpGlobal reverses installOmpGlobal.
+func uninstallOmpGlobal() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	return omp.RemoveResources(omp.UserRoot(home))
+}
+
 func installCline(dir, bin string) {
 	a := cline.NewAdapter(dir)
 	if err := a.Configure(ctx(), bin); err != nil {
@@ -231,37 +270,18 @@ func installOpenCodeGlobal(bin string) error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	path := filepath.Join(home, ".config", "opencode", "opencode.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-	data, err := os.ReadFile(path)
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
-		data = []byte("{}")
+		return err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		config = map[string]any{}
-	}
-	mcpServers, _ := config["mcp"].(map[string]any)
-	if mcpServers == nil {
-		mcpServers = map[string]any{}
-	}
-	mcpServers["agent-session"] = map[string]any{
-		"type":    "local",
-		"command": []string{bin, "mcp"},
-		"enabled": true,
-		"environment": map[string]string{
-			"AGENT_SESSION_AGENT": "opencode",
-		},
-	}
-	config["mcp"] = mcpServers
+	entry := agent.Section(agent.Section(config, "mcp"), "agent-session")
+	entry["type"] = "local"
+	entry["command"] = []any{bin, "mcp"}
+	entry["enabled"] = true
+	agent.Section(entry, "environment")["AGENT_SESSION_AGENT"] = "opencode"
 	opencode.MergeGlobalInstructions(config)
 
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal opencode.json: %w", err)
-	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := agent.WriteJSONConfig(path, config); err != nil {
 		return err
 	}
 	return installCommands("opencode")
@@ -276,32 +296,22 @@ func uninstallOpenCodeGlobal() error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	path := filepath.Join(home, ".config", "opencode", "opencode.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", path, err)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return uninstallCommands("opencode")
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+	config, err := agent.ReadJSONConfig(path)
+	if err != nil {
+		return err
 	}
 	if mcpServers, ok := config["mcp"].(map[string]any); ok {
 		delete(mcpServers, "agent-session")
 		if len(mcpServers) == 0 {
 			delete(config, "mcp")
-		} else {
-			config["mcp"] = mcpServers
 		}
 	}
 	opencode.RemoveGlobalInstructions(config)
 
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal opencode.json: %w", err)
-	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := agent.WriteJSONConfig(path, config); err != nil {
 		return err
 	}
 	return uninstallCommands("opencode")
@@ -314,35 +324,16 @@ func installCursorGlobal(bin string) error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	path := filepath.Join(home, ".cursor", "mcp.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create .cursor dir: %w", err)
-	}
-	data, err := os.ReadFile(path)
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
-		data = []byte("{}")
+		return err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		config = map[string]any{}
-	}
-	mcpServers, _ := config["mcpServers"].(map[string]any)
-	if mcpServers == nil {
-		mcpServers = map[string]any{}
-	}
-	mcpServers["agent-session"] = map[string]any{
-		"command": bin,
-		"args":    []string{"mcp"},
-		"env": map[string]string{
-			"AGENT_SESSION_AGENT": "cursor",
-		},
-	}
-	config["mcpServers"] = mcpServers
+	entry := agent.Section(agent.Section(config, "mcpServers"), "agent-session")
+	entry["command"] = bin
+	entry["args"] = []any{"mcp"}
+	agent.Section(entry, "env")["AGENT_SESSION_AGENT"] = "cursor"
 
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal cursor mcp.json: %w", err)
-	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := agent.WriteJSONConfig(path, config); err != nil {
 		return err
 	}
 	return installCommands("cursor")
@@ -357,33 +348,23 @@ func uninstallCursorGlobal() error {
 		return fmt.Errorf("home dir: %w", err)
 	}
 	path := filepath.Join(home, ".cursor", "mcp.json")
-	data, err := os.ReadFile(path)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return uninstallCommands("cursor")
+	}
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", path, err)
+		return err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
-	}
-	mcpServers, ok := config["mcpServers"].(map[string]any)
+	servers, ok := config["mcpServers"].(map[string]any)
 	if !ok {
-		return nil
+		return uninstallCommands("cursor")
 	}
-	delete(mcpServers, "agent-session")
-	if len(mcpServers) == 0 {
+	delete(servers, "agent-session")
+	if len(servers) == 0 {
 		delete(config, "mcpServers")
-	} else {
-		config["mcpServers"] = mcpServers
 	}
 
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal cursor mcp.json: %w", err)
-	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := agent.WriteJSONConfig(path, config); err != nil {
 		return err
 	}
 	return uninstallCommands("cursor")

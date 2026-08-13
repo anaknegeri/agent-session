@@ -9,7 +9,7 @@ func TestDetectInstalled(t *testing.T) {
 		byName[a.Name] = a.Present
 	}
 
-	for _, name := range []string{"claude", "opencode", "codex", "cursor", "cline"} {
+	for _, name := range []string{"claude", "opencode", "codex", "cursor", "cline", "pi", "omp"} {
 		if _, ok := byName[name]; !ok {
 			t.Fatalf("DetectInstalled missing agent %q", name)
 		}

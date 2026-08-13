@@ -509,7 +509,7 @@ func (s *Server) registerTools() {
 				mcp.WithString("scope", mcp.Description("stat|full")),
 			},
 			run: func(ctx context.Context, args map[string]any) (any, error) {
-				return s.app.Workspace.Diff(ctx, s.app.Root)
+				return s.app.Workspace.Diff(ctx, s.app.Root, argString(args, "scope"))
 			},
 		},
 	}

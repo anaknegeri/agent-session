@@ -110,6 +110,11 @@ else is rejected. Payloads over 8192 bytes are offloaded to an artifact.
 | `workspace.status` | readOnly | — | branch, commit, dirty, changed files |
 | `workspace.diff` | readOnly | `scope?` | git diff, `stat` or `full` |
 
+`workspace.diff` diffs the working tree against `HEAD`, so staged changes are
+included. `scope=stat` returns the summary; anything else, including an absent or
+unrecognised value, returns the full patch — a mistyped scope must not quietly
+return less than the caller asked for.
+
 ## Every tool has a description
 
 Tool names alone are not a usable surface: an agent choosing between 25 of them
@@ -129,9 +134,12 @@ because they were all silently dropped once already.
 | `session://workspace` | git workspace status |
 | `memory://recent` | recent knowledge entries |
 
-Resources are read-only by definition. They are the cheap path for clients that
-prefer resources over tools; nothing is exposed there that a tool cannot also
-return.
+Resources are read-only by definition: reading one records nothing, appends no
+event and creates no checkpoint. They are the cheap path for clients that prefer
+resources over tools; nothing is exposed there that a tool cannot also return.
+
+The contents of a response are labelled with the URI that was requested, so a
+client can match what it holds to what it asked for.
 
 ## Server instructions
 

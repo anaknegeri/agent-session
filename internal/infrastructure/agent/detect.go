@@ -20,6 +20,7 @@ func DetectInstalled() []InstalledAgent {
 		{Name: "codex", Present: lookPath("codex")},
 		{Name: "cursor", Present: lookPath("cursor-agent")},
 		{Name: "pi", Present: lookPath("pi")},
+		{Name: "omp", Present: lookPath("omp")},
 		{Name: "cline", Present: false}, // Cline is a VS Code extension, no CLI
 	}
 }

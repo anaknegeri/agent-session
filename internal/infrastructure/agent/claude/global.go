@@ -1,12 +1,12 @@
 package claude
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 // guardedHookCommands maps Claude Code hook events to shell commands that
@@ -53,26 +53,43 @@ func HasAgentSessionHooks(settings map[string]any) bool {
 	return true
 }
 
-// EnsureGlobalHooks merges the guarded SessionStart/Stop/PreCompact hooks into
-// ~/.claude/settings.json without touching unrelated settings. Idempotent —
-// re-running does not duplicate entries.
-func EnsureGlobalHooks(home string) error {
-	path := filepath.Join(home, ".claude", "settings.json")
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("read %s: %w", path, err)
-	}
-	settings := map[string]any{}
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("parse %s: %w", path, err)
-		}
+// GlobalSettingsPath is the user-scope settings file Claude Code merges into
+// every project.
+func GlobalSettingsPath(home string) string {
+	return filepath.Join(home, ".claude", "settings.json")
+}
+
+// GlobalRulePath is the user-scope memory file Claude Code always reads.
+func GlobalRulePath(home string) string {
+	return filepath.Join(home, ".claude", "CLAUDE.md")
+}
+
+// EnsureGlobalHooks merges the guarded hooks into ~/.claude/settings.json.
+func EnsureGlobalHooks(home string) error { return EnsureHooks(GlobalSettingsPath(home)) }
+
+// RemoveGlobalHooks strips them from ~/.claude/settings.json.
+func RemoveGlobalHooks(home string) error { return RemoveHooks(GlobalSettingsPath(home)) }
+
+// EnsureGlobalRule appends the guarded rule to ~/.claude/CLAUDE.md.
+func EnsureGlobalRule(home string) (string, error) {
+	return EnsureRule(GlobalRulePath(home), GlobalRule)
+}
+
+// RemoveGlobalRule strips the guarded rule from ~/.claude/CLAUDE.md.
+func RemoveGlobalRule(home string) error { return RemoveRule(GlobalRulePath(home), GlobalRule) }
+
+// EnsureHooks merges the guarded SessionStart/Stop/PreCompact hooks into a Claude
+// Code settings file without touching unrelated settings. Idempotent —
+// re-running does not duplicate entries. Used for both scopes: the guards are
+// what make the same commands correct in a user-scope file and in a project one,
+// since a hook subprocess does not inherit the project's working directory.
+func EnsureHooks(path string) error {
+	settings, err := agent.ReadJSONConfig(path)
+	if err != nil {
+		return err
 	}
 
-	hooks, _ := settings["hooks"].(map[string]any)
-	if hooks == nil {
-		hooks = map[string]any{}
-	}
+	hooks := agent.Section(settings, "hooks")
 	for event, command := range guardedHookCommands() {
 		if hasAgentSessionHook(hooks, event) {
 			continue
@@ -80,19 +97,7 @@ func EnsureGlobalHooks(home string) error {
 		entries, _ := hooks[event].([]any)
 		hooks[event] = append(entries, hookEntry(command))
 	}
-	settings["hooks"] = hooks
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(settings); err != nil {
-		return fmt.Errorf("marshal settings.json: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
-	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	return agent.WriteJSONConfig(path, settings)
 }
 
 func hasAgentSessionHook(hooks map[string]any, event string) bool {
@@ -123,21 +128,16 @@ func isAgentSessionEntry(e any) bool {
 	return false
 }
 
-// RemoveGlobalHooks strips only the agent-session hook entries from
-// ~/.claude/settings.json, leaving any other hooks or settings untouched.
-// No-op if the file or the entries don't exist.
-func RemoveGlobalHooks(home string) error {
-	path := filepath.Join(home, ".claude", "settings.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", path, err)
+// RemoveHooks strips only the agent-session hook entries from a Claude Code
+// settings file, leaving any other hooks or settings untouched. No-op if the file
+// or the entries don't exist.
+func RemoveHooks(path string) error {
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
 	}
-	var settings map[string]any
-	if err := json.Unmarshal(data, &settings); err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+	settings, err := agent.ReadJSONConfig(path)
+	if err != nil {
+		return err
 	}
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -166,25 +166,25 @@ func RemoveGlobalHooks(home string) error {
 	}
 	if len(hooks) == 0 {
 		delete(settings, "hooks")
-	} else {
-		settings["hooks"] = hooks
 	}
-
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(settings); err != nil {
-		return fmt.Errorf("marshal settings.json: %w", err)
+	// A settings file that held nothing but our hooks is ours to remove; anything
+	// else in it belongs to the user and stays.
+	if len(settings) == 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		return nil
 	}
-	return os.WriteFile(path, buf.Bytes(), 0o644)
+	return agent.WriteJSONConfig(path, settings)
 }
 
-// globalRuleSection is scoped with a .agent/ guard so it is inert in every
-// project that doesn't use agent-session, unlike an unconditional rule.
-const globalRuleSection = "## Agent Session"
+// ruleSection is the heading both rules share, and the marker that makes
+// appending them idempotent and removal surgical.
+const ruleSection = "## Agent Session"
 
-var globalRule = globalRuleSection + `
+// GlobalRule is scoped with a .agent/ guard so it is inert in every project that
+// doesn't use agent-session, unlike an unconditional rule.
+var GlobalRule = ruleSection + `
 
 If this project contains a ` + "`.agent/`" + ` directory (created by ` + "`agent-session init`" + `),
 it uses Agent Session as its session layer. SessionStart/Stop hooks already keep
@@ -194,10 +194,30 @@ state via the agent-session MCP tools: ` + "`task.create`/`task.update`" + `,
 for test results. Ignore this note entirely in projects without a ` + "`.agent/`" + ` directory.
 `
 
-// EnsureGlobalRule idempotently appends the Agent Session rule to
-// ~/.claude/CLAUDE.md. Returns the path written, or "" when already present.
-func EnsureGlobalRule(home string) (string, error) {
-	path := filepath.Join(home, ".claude", "CLAUDE.md")
+// ProjectRule needs no guard: it is only ever written into the project that was
+// initialized, so it can state the workflow directly.
+var ProjectRule = ruleSection + `
+
+This project uses Agent Session (agent-session) as its session layer.
+
+- At the start of a session, FIRST call the agent-session MCP tools in order:
+  session.get, then context.get. Continue the existing task; do not start from scratch.
+- The context summary is a bounded preview (token savings). Call
+  ` + "`context.get depth=full`" + ` whenever you need complete decisions, blockers,
+  changed files, or events — never act on incomplete info when detail is one call away.
+- Record work as you go: task.create / task.update, decision.create, blocker.create,
+  and event.append for test results (test.failed / test.passed).
+- Before finishing (Stop), create a checkpoint with session.checkpoint including next_action.
+- To keep context small, summarize before finishing: call context.summarize, then
+  store the summary with memory.put (kind=project_knowledge).
+`
+
+// EnsureRule idempotently appends rule to a CLAUDE.md, preserving whatever the
+// user already wrote there. Returns the path written, or "" when already present.
+//
+// Appending rather than writing is the whole contract: a CLAUDE.md is the user's
+// project memory, and setup has no business replacing it.
+func EnsureRule(path, rule string) (string, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -205,7 +225,7 @@ func EnsureGlobalRule(home string) (string, error) {
 		}
 		content = nil
 	}
-	if strings.Contains(string(content), globalRuleSection) {
+	if strings.Contains(string(content), ruleSection) {
 		return "", nil
 	}
 
@@ -213,9 +233,9 @@ func EnsureGlobalRule(home string) (string, error) {
 	if len(content) > 0 {
 		header = "\n"
 	}
-	updated := string(content) + header + globalRule
+	updated := string(content) + header + rule
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("create .claude dir: %w", err)
+		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
 		return "", fmt.Errorf("write %s: %w", path, err)
@@ -223,10 +243,10 @@ func EnsureGlobalRule(home string) (string, error) {
 	return path, nil
 }
 
-// RemoveGlobalRule strips the Agent Session section from ~/.claude/CLAUDE.md,
-// leaving any other content untouched. No-op if the file or section is absent.
-func RemoveGlobalRule(home string) error {
-	path := filepath.Join(home, ".claude", "CLAUDE.md")
+// RemoveRule strips the Agent Session section from a CLAUDE.md, leaving any other
+// content untouched. A file that held nothing else is removed. No-op if the file
+// or the section is absent.
+func RemoveRule(path, rule string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -234,13 +254,22 @@ func RemoveGlobalRule(home string) error {
 		}
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	if !strings.Contains(string(content), globalRuleSection) {
+	if !strings.Contains(string(content), ruleSection) {
 		return nil
 	}
 
-	updated := strings.Replace(string(content), "\n"+globalRule, "", 1)
+	updated := strings.Replace(string(content), "\n"+rule, "", 1)
 	if updated == string(content) {
-		updated = strings.Replace(string(content), globalRule, "", 1)
+		updated = strings.Replace(string(content), rule, "", 1)
 	}
-	return os.WriteFile(path, []byte(updated), 0o644)
+	if strings.TrimSpace(updated) == "" {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
 }

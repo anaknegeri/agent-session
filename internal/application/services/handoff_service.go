@@ -17,6 +17,7 @@ var supportedHandoffAgents = map[string]bool{
 	"codex":    true,
 	"opencode": true,
 	"pi":       true,
+	"omp":      true,
 }
 
 type HandoffService struct {

@@ -144,20 +144,44 @@ func (a *Adapter) uninstallHooks() error {
 		return err
 	}
 	path := filepath.Join(dir, "hooks.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		// Writing here would *create* the file uninstall exists to clean up, and
+		// $CODEX_HOME itself may be absent, which install creates but this must not.
+		return nil
+	}
 	root, err := readHooks(path)
 	if err != nil {
 		return err
 	}
 	hooks := childObject(root, "hooks")
+	removed := false
 	for event := range hookCommands {
-		remaining := removeOurEntries(hooks[event])
+		entries, ok := hooks[event].([]any)
+		if !ok {
+			continue
+		}
+		remaining := removeOurEntries(entries)
+		if len(remaining) == len(entries) {
+			continue
+		}
+		removed = true
 		if len(remaining) == 0 {
 			delete(hooks, event)
 			continue
 		}
 		hooks[event] = remaining
 	}
-	root["hooks"] = hooks
+	if !removed {
+		return nil
+	}
+	// A hooks.json holding nothing but an empty hooks object is litter we left, so
+	// a second uninstall has nothing to find and the machine looks as it did.
+	if len(hooks) == 0 && len(root) == 1 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		return nil
+	}
 	return writeHooks(path, root)
 }
 
@@ -248,9 +272,17 @@ func (a *Adapter) uninstallMCP() error {
 	cfg := filepath.Join(dir, "config.toml")
 	data, err := os.ReadFile(cfg)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		// A config we cannot read is a config we cannot clean: reporting success
+		// here told the user the server was gone while it kept starting.
+		return fmt.Errorf("read %s: %w", cfg, err)
 	}
 	out := removeMCPSection(string(data), "agent-session")
+	if out == string(data) {
+		return nil
+	}
 	return os.WriteFile(cfg, []byte(out), 0o644)
 }
 
@@ -272,26 +304,41 @@ func configDir() (string, error) {
 	return filepath.Join(home, ".codex"), nil
 }
 
+// removeMCPSection drops our server's table and every sub-table under it. A
+// sub-table such as [mcp_servers.agent-session.env] is a header like any other,
+// so stopping at the first `[` left it behind — and a table re-declaring the
+// server with no command in it is worse than the entry we set out to remove.
 func removeMCPSection(toml, server string) string {
 	lines := strings.Split(toml, "\n")
-	var result []string
+	result := make([]string, 0, len(lines))
 	skip := false
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[mcp_servers."+server+"]") {
-			skip = true
-			continue
+		if strings.HasPrefix(trimmed, "[") {
+			skip = ownsSection(trimmed, server)
 		}
 		if skip {
-			if trimmed == "" || strings.HasPrefix(trimmed, "[") {
-				skip = false
-			} else {
-				continue
-			}
+			continue
 		}
 		result = append(result, line)
 	}
 	return strings.Join(result, "\n")
+}
+
+// ownsSection reports whether a TOML header names our server's table or one
+// nested inside it, in either the bare or quoted spelling Codex may write.
+// The boundary matters: [mcp_servers.agent-session-other] belongs to someone else.
+func ownsSection(header, server string) bool {
+	for _, prefix := range []string{"[mcp_servers." + server, `[mcp_servers."` + server + `"`} {
+		rest, ok := strings.CutPrefix(header, prefix)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(rest, "]") || strings.HasPrefix(rest, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 var _ agent.Adapter = (*Adapter)(nil)

@@ -2,7 +2,6 @@ package cursor
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,33 +42,15 @@ func (a *Adapter) Configure(ctx context.Context, mcpCommand string) error {
 
 func (a *Adapter) writeMCPConfig(cursorDir, mcpCommand string) error {
 	path := filepath.Join(cursorDir, "mcp.json")
-	data, err := os.ReadFile(path)
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
-		data = []byte("{}")
+		return err
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		config = map[string]any{}
-	}
-
-	mcpServers, _ := config["mcpServers"].(map[string]any)
-	if mcpServers == nil {
-		mcpServers = map[string]any{}
-	}
-	mcpServers["agent-session"] = map[string]any{
-		"command": mcpCommand,
-		"args":    []string{"mcp"},
-		"env": map[string]string{
-			"AGENT_SESSION_AGENT": "cursor",
-		},
-	}
-	config["mcpServers"] = mcpServers
-
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal mcp.json: %w", err)
-	}
-	return os.WriteFile(path, out, 0o644)
+	entry := agent.Section(agent.Section(config, "mcpServers"), "agent-session")
+	entry["command"] = mcpCommand
+	entry["args"] = []any{"mcp"}
+	agent.Section(entry, "env")["AGENT_SESSION_AGENT"] = "cursor"
+	return agent.WriteJSONConfig(path, config)
 }
 
 const rulesContent = `---
@@ -112,25 +93,29 @@ func (a *Adapter) writeRules(cursorDir string) error {
 
 func (a *Adapter) Install(ctx context.Context) error { return nil }
 func (a *Adapter) Uninstall(ctx context.Context) error {
-	mcpPath := filepath.Join(a.projectRoot, ".cursor", "mcp.json")
-	data, err := os.ReadFile(mcpPath)
+	path := filepath.Join(a.projectRoot, ".cursor", "mcp.json")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
+		return err
+	}
+	servers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
 		return nil
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
+	delete(servers, "agent-session")
+	if len(servers) == 0 {
+		delete(config, "mcpServers")
+	}
+	if len(config) == 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
 		return nil
 	}
-	mcpServers, _ := config["mcpServers"].(map[string]any)
-	if mcpServers == nil {
-		return nil
-	}
-	delete(mcpServers, "agent-session")
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal mcp.json: %w", err)
-	}
-	return os.WriteFile(mcpPath, out, 0o644)
+	return agent.WriteJSONConfig(path, config)
 }
 
 var _ agent.Adapter = (*Adapter)(nil)

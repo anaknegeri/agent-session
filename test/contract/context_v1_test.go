@@ -7,8 +7,8 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/application/services"
-	ctxrender "github.com/anaknegeri/agent-session/internal/infrastructure/context"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	ctxrender "github.com/anaknegeri/agent-session/internal/infrastructure/context"
 )
 
 // contextHeadingsV1 is the ordered heading vocabulary of the rendered context
@@ -200,8 +200,8 @@ func fullSnapshot() *entities.Snapshot {
 			{ID: "decision_1", Decision: "freeze at 25 tools", Reason: "clients gate on the surface"},
 			{ID: "decision_2", Decision: "version only what is read back off disk", Reason: "the rest is observed live"},
 		},
-		Files:      entities.FilesState{Modified: []string{"pkg/contract/contract.go", "docs/spec/README.md"}},
-		Tests:      entities.TestsState{Status: "passed", Failures: 0},
+		Files: entities.FilesState{Modified: []string{"pkg/contract/contract.go", "docs/spec/README.md"}},
+		Tests: entities.TestsState{Status: "passed", Failures: 0},
 		Blockers: []*entities.Blocker{
 			{ID: "blocker_1", Description: "waiting on review", Status: entities.BlockerStatusOpen},
 			{ID: "blocker_2", Description: "spec not published yet", Status: entities.BlockerStatusOpen},

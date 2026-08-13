@@ -13,6 +13,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	agentsession "github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
 	"github.com/anaknegeri/agent-session/pkg/logger"
 )
@@ -484,4 +485,287 @@ func storeFingerprint(t *testing.T, app *bootstrap.App) string {
 	return fmt.Sprintf("session=%s last_agent=%s task=%s events=%d checkpoints=%d tasks=%d decisions=%d memory=%d",
 		session.ID, session.LastAgent, session.CurrentTaskID,
 		len(events), len(checkpoints), len(tasks), len(decisions), len(memories))
+}
+
+// TestResourcesDoNotWrite holds the resource surface to the promise the protocol
+// makes for it: resources are read-only. session://context used to render through
+// Context.Get, which syncs file changes and auto-checkpoints a stale session, so a
+// client polling the resource — the cheap path clients are pointed at — was
+// writing to the session on every poll.
+func TestResourcesDoNotWrite(t *testing.T) {
+	c, app := setupMCP(t)
+
+	// give every resource something to return, and leave an unrecorded change in
+	// the working tree: the sync and the auto-checkpoint only fire when git reports
+	// files the session has not seen
+	call(t, c, "task.create", map[string]any{"title": "resource audit"})
+	call(t, c, "decision.create", map[string]any{"decision": "resources stay read-only", "reason": "clients poll them"})
+	call(t, c, "memory.put", map[string]any{"kind": "project_knowledge", "content": "resources are read-only"})
+	call(t, c, "session.checkpoint", map[string]any{"label": "before resource reads"})
+	if err := writeFile(filepath.Join(app.Root, "polled.go"), "package oauth\n\n// unrecorded\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, uri := range resourceURIs(t, c) {
+		before := storeFingerprint(t, app)
+		readResource(t, c, uri)
+		readResource(t, c, uri)
+		if after := storeFingerprint(t, app); before != after {
+			t.Errorf("resource %s changed the session state:\n before %s\n after  %s", uri, before, after)
+		}
+	}
+}
+
+// TestResourcesEchoRequestedURI covers the URI a resource labels its contents
+// with. Every handler returned a single hardcoded "session://resource", so a
+// client reading memory://recent got contents attributed to something else and
+// could not match a response to the request it made.
+func TestResourcesEchoRequestedURI(t *testing.T) {
+	c, _ := setupMCP(t)
+
+	call(t, c, "task.create", map[string]any{"title": "uri audit"})
+	call(t, c, "decision.create", map[string]any{"decision": "echo the uri", "reason": "clients match on it"})
+	call(t, c, "memory.put", map[string]any{"kind": "project_knowledge", "content": "uris are echoed"})
+	call(t, c, "session.checkpoint", map[string]any{"label": "before uri reads"})
+
+	uris := resourceURIs(t, c)
+	if len(uris) != 7 {
+		t.Fatalf("expected 7 resources, got %d: %v", len(uris), uris)
+	}
+	for _, uri := range uris {
+		res := readResource(t, c, uri)
+		if len(res.Contents) == 0 {
+			t.Errorf("resource %s returned no contents", uri)
+			continue
+		}
+		for _, content := range res.Contents {
+			text, ok := content.(mcp.TextResourceContents)
+			if !ok {
+				t.Errorf("resource %s returned %T, want text contents", uri, content)
+				continue
+			}
+			if text.URI != uri {
+				t.Errorf("resource %s labelled its contents %q", uri, text.URI)
+			}
+		}
+	}
+}
+
+// TestWorkspaceDiffScope covers the documented `scope` argument. It was declared
+// and then dropped, so an agent asking for `stat` to bound its token spend was
+// handed the whole patch anyway.
+func TestWorkspaceDiffScope(t *testing.T) {
+	c, app := setupMCP(t)
+
+	// server.go is committed by gitInit, so editing it gives `git diff HEAD`
+	// something to report
+	if err := writeFile(filepath.Join(app.Root, "server.go"), "package oauth\n\nfunc Login() {}\n"); err != nil {
+		t.Fatal(err)
+	}
+
+	full := call(t, c, "workspace.diff", nil)
+	if !strings.Contains(full, "func Login() {}") {
+		t.Errorf("no scope dropped the patch body: %s", full)
+	}
+
+	stat := call(t, c, "workspace.diff", map[string]any{"scope": "stat"})
+	if strings.Contains(stat, "func Login() {}") {
+		t.Errorf("scope=stat returned the patch body: %s", stat)
+	}
+	if !strings.Contains(stat, "server.go") || !strings.Contains(stat, "1 file changed") {
+		t.Errorf("scope=stat is not a stat summary: %s", stat)
+	}
+
+	// an unrecognised scope must widen back to the full diff rather than quietly
+	// return less than the caller asked for
+	if unknown := call(t, c, "workspace.diff", map[string]any{"scope": "tiny"}); unknown != full {
+		t.Errorf("scope=tiny changed the diff:\n got  %s\n want %s", unknown, full)
+	}
+}
+
+// TestMCPSessionDiffDefaults covers the checkpoint pair session.diff picks when
+// the caller omits an ID — the normal call, since both arguments are optional.
+// The diff output does not name the checkpoints it compared, so the wrong pair
+// reads exactly like an honest empty diff unless the pairing is asserted.
+func TestMCPSessionDiffDefaults(t *testing.T) {
+	c, app := setupMCP(t)
+	ctx := context.Background()
+
+	// init renders the context, and rendering a session with no checkpoint takes
+	// one, so a fresh project holds exactly one. Anything else and the call below
+	// is no longer the fewer-than-two case.
+	cps, err := app.Checkpoint.ListBySession(ctx, appSessionID(app), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cps) != 1 {
+		t.Fatalf("a fresh project holds %d checkpoints, this case needs 1", len(cps))
+	}
+
+	// One checkpoint has nothing to compare against. Saying so is the only honest
+	// answer: diffing it against itself reports "no changes", which an agent reads
+	// as "nothing happened".
+	if res := callAny(t, c, "session.diff", nil); !strings.Contains(res, "need at least two checkpoints") {
+		t.Fatalf("session.diff over a single checkpoint: %s", res)
+	}
+
+	first := extractIDLike(t, call(t, c, "session.checkpoint", map[string]any{
+		"label": "one", "next_action": "alpha",
+	}), "chk_")
+	call(t, c, "session.checkpoint", map[string]any{"label": "two", "next_action": "beta"})
+	call(t, c, "session.checkpoint", map[string]any{"label": "three", "next_action": "gamma"})
+
+	res := call(t, c, "session.diff", nil)
+	if !strings.Contains(res, `"next_action_from":"beta"`) || !strings.Contains(res, `"next_action_to":"gamma"`) {
+		t.Errorf("session.diff with no arguments did not compare the two latest checkpoints: %s", res)
+	}
+
+	// One side supplied, the other still defaults — the same branch, entered with
+	// only one ID missing.
+	res = call(t, c, "session.diff", map[string]any{"before_id": first})
+	if !strings.Contains(res, `"next_action_from":"alpha"`) || !strings.Contains(res, `"next_action_to":"gamma"`) {
+		t.Errorf("session.diff with before_id only did not default after_id to the latest checkpoint: %s", res)
+	}
+}
+
+// TestMCPContextUpdateFields covers every field context.update accepts. Each one
+// writes somewhere different — the current task, a fresh checkpoint, the session
+// row — so a field wired to the wrong writer, or quietly dropped from the switch,
+// changes nothing while the tool still answers with the record it did not update.
+func TestMCPContextUpdateFields(t *testing.T) {
+	c, app := setupMCP(t)
+	ctx := context.Background()
+	sessionID := appSessionID(app)
+
+	taskID := extractID(t, call(t, c, "task.create", map[string]any{"title": "wire the token refresh"}))
+
+	// The task is read back by ID, not through GetCurrent: task_status below
+	// completes it, and a completed task is no longer anyone's current task.
+	call(t, c, "context.update", map[string]any{"field": "task_title", "value": "rotate refresh tokens"})
+	task, err := app.Task.Get(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Title != "rotate refresh tokens" {
+		t.Errorf("task_title did not reach the current task, title is %q", task.Title)
+	}
+
+	call(t, c, "context.update", map[string]any{"field": "task_status", "value": entities.TaskStatusCompleted})
+	task, err = app.Task.Get(ctx, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != entities.TaskStatusCompleted {
+		t.Errorf("task_status did not reach the current task, status is %q", task.Status)
+	}
+	if task.Title != "rotate refresh tokens" {
+		t.Errorf("task_status overwrote the title with %q", task.Title)
+	}
+
+	// next_action is the one field that is not an update: it checkpoints, which is
+	// where the next agent looks for what to do next.
+	before, err := app.Checkpoint.ListBySession(ctx, sessionID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call(t, c, "context.update", map[string]any{"field": "next_action", "value": "add the rotation test"})
+	after, err := app.Checkpoint.ListBySession(ctx, sessionID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before)+1 {
+		t.Fatalf("next_action created %d checkpoints, want 1", len(after)-len(before))
+	}
+	if after[0].NextAction != "add the rotation test" {
+		t.Errorf("the checkpoint next_action created carries %q", after[0].NextAction)
+	}
+
+	// session_title last: task.create already named the session after its first
+	// task, so an unwritten update would otherwise be indistinguishable from that.
+	call(t, c, "context.update", map[string]any{"field": "session_title", "value": "OAuth hardening"})
+	session, err := app.Session.Get(ctx, sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.Title != "OAuth hardening" {
+		t.Errorf("session_title did not reach the session row, title is %q", session.Title)
+	}
+
+	// A field the switch does not handle has to fail. Returning success for it
+	// would tell an agent its update landed when nothing was written.
+	if res := callAny(t, c, "context.update", map[string]any{"field": "task_owner", "value": "codex"}); !strings.Contains(res, `unknown field "task_owner"`) {
+		t.Errorf("context.update did not reject a field it cannot write: %s", res)
+	}
+}
+
+// TestMCPEventAppendAutoCheckpoint covers the one tool whose extra work depends on
+// an argument value: a passing test run is checkpointed, everything else is not.
+// The checkpoint is the only trace of that branch, so a broken comparison loses
+// the green run silently — event.append still answers ok either way.
+func TestMCPEventAppendAutoCheckpoint(t *testing.T) {
+	// Each case gets its own server: the smart-checkpoint window is per server, so
+	// a shared one would suppress the checkpoint the first case has to observe.
+	t.Run("test.passed checkpoints", func(t *testing.T) {
+		c, app := setupMCP(t)
+		sessionID := appSessionID(app)
+		before := checkpointCount(t, app, sessionID)
+
+		call(t, c, "event.append", map[string]any{"type": entities.EventTestPassed, "payload": `{"suite":"unit"}`})
+
+		cps, err := app.Checkpoint.ListBySession(context.Background(), sessionID, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cps) != before+1 {
+			t.Fatalf("test.passed produced %d checkpoints, want 1", len(cps)-before)
+		}
+		if cps[0].Label != "tests passed" {
+			t.Errorf("the checkpoint test.passed created is labelled %q", cps[0].Label)
+		}
+	})
+
+	t.Run("other types do not", func(t *testing.T) {
+		c, app := setupMCP(t)
+		sessionID := appSessionID(app)
+		before := checkpointCount(t, app, sessionID)
+
+		call(t, c, "event.append", map[string]any{"type": entities.EventCommandExecuted, "payload": `{"cmd":"go test"}`})
+
+		if after := checkpointCount(t, app, sessionID); after != before {
+			t.Errorf("command.executed checkpointed too, so the branch is not on the event type: %d new checkpoints", after-before)
+		}
+	})
+}
+
+func checkpointCount(t *testing.T, app *bootstrap.App, sessionID string) int {
+	t.Helper()
+	cps, err := app.Checkpoint.ListBySession(context.Background(), sessionID, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(cps)
+}
+
+func resourceURIs(t *testing.T, c *client.Client) []string {
+	t.Helper()
+	res, err := c.ListResources(context.Background(), mcp.ListResourcesRequest{})
+	if err != nil {
+		t.Fatalf("list resources: %v", err)
+	}
+	uris := make([]string, 0, len(res.Resources))
+	for _, r := range res.Resources {
+		uris = append(uris, r.URI)
+	}
+	return uris
+}
+
+func readResource(t *testing.T, c *client.Client, uri string) *mcp.ReadResourceResult {
+	t.Helper()
+	req := mcp.ReadResourceRequest{}
+	req.Params.URI = uri
+	res, err := c.ReadResource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("read resource %s: %v", uri, err)
+	}
+	return res
 }

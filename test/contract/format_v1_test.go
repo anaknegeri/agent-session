@@ -159,6 +159,86 @@ func TestFormatRejectsFutureVersion(t *testing.T) {
 	}
 }
 
+// TestFormatConfigDefaultsV1 holds the configuration table of
+// docs/spec/format-v1.md:57-58 against the config a real project is opened with.
+// The numbers are literals here on purpose: the loader agrees with any default it
+// returns, while a project on disk has no config.toml of its own and inherits
+// whatever this build says. Changing one number re-renders every existing
+// project's context, or re-bounds its checkpoint pruning, with nothing on disk
+// having changed.
+func TestFormatConfigDefaultsV1(t *testing.T) {
+	app := newProject(t)
+
+	cfg, err := config.Load(app.Root)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	// format-v1.md:57 | [context] | context budget: max_decisions 5, max_blockers 3,
+	// max_files 8, max_events 10, max_progress 10, max_item_chars 200,
+	// max_total_chars 4000, inject_memory true, max_memory 3
+	budget := map[string]int{
+		"max_decisions":   cfg.Context.MaxDecisions,
+		"max_blockers":    cfg.Context.MaxBlockers,
+		"max_files":       cfg.Context.MaxFiles,
+		"max_events":      cfg.Context.MaxEvents,
+		"max_progress":    cfg.Context.MaxProgress,
+		"max_item_chars":  cfg.Context.MaxItemChars,
+		"max_total_chars": cfg.Context.MaxTotalChars,
+		"max_memory":      cfg.Context.MaxMemory,
+	}
+	for key, want := range map[string]int{
+		"max_decisions":   5,
+		"max_blockers":    3,
+		"max_files":       8,
+		"max_events":      10,
+		"max_progress":    10,
+		"max_item_chars":  200,
+		"max_total_chars": 4000,
+		"max_memory":      3,
+	} {
+		if budget[key] != want {
+			t.Errorf("context %s is %d, v1 says %d\n see docs/spec/format-v1.md", key, budget[key], want)
+		}
+	}
+	if !cfg.Context.InjectMemory {
+		t.Error("inject_memory defaults to false, v1 says true\n see docs/spec/format-v1.md")
+	}
+
+	// format-v1.md:58 | [retention] | checkpoints kept per kind: manual 50,
+	// auto 20, precompact 10, handoff 20. Read through CheckpointLimit, because
+	// that is how pruning reaches the number: a kind it stops matching is
+	// unbounded, whatever the field says.
+	for kind, want := range map[string]int{
+		"manual":     50,
+		"auto":       20,
+		"precompact": 10,
+		"handoff":    20,
+	} {
+		if got := cfg.Retention.CheckpointLimit(kind); got != want {
+			t.Errorf("retention keeps %d %s checkpoints, v1 says %d\n see docs/spec/format-v1.md", got, kind, want)
+		}
+	}
+
+	// The key names as init wrote them. A renamed toml tag still loads and still
+	// reports these defaults — it just silently ignores the value an existing
+	// project already wrote under the old name.
+	data, err := os.ReadFile(filepath.Join(app.Root, config.DirName, config.ConfigFileName))
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	text := string(data)
+	for _, key := range []string{
+		"max_decisions", "max_blockers", "max_files", "max_events", "max_progress",
+		"max_item_chars", "max_total_chars", "inject_memory", "max_memory",
+		"max_manual", "max_auto", "max_precompact", "max_handoff",
+	} {
+		if !strings.Contains(text, key) {
+			t.Errorf("the written config has no %s key, so a config that sets it is ignored:\n%s", key, text)
+		}
+	}
+}
+
 // TestIDPrefixesV1 drives the real write paths and checks the IDs they mint. The
 // prefixes are asserted from records rather than from the ids.New call sites,
 // because a call site can be right in one service and wrong in another — which is

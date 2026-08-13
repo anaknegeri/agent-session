@@ -35,7 +35,7 @@ of the work. One binary, one SQLite file per project, no daemon.
 ## Features
 
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
-- **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline, pi.
+- **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline, pi, omp (oh-my-pi).
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
 - **MCP-native** — 25 tools + 7 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
@@ -170,13 +170,13 @@ or `--only claude|opencode|codex` to wire a single agent.
 | `agent-session watch` | Auto-regenerate context.md when the session changes (`-i, --interval`) |
 | `agent-session resume` | Resume the latest session (`-a, --agent`) |
 | `agent-session checkpoint` | Create a checkpoint (`--label`, `-n, --next-action`) |
-| `agent-session handoff <agent>` | Compose handoff context for `claude`/`codex`/`opencode`/`pi` |
+| `agent-session handoff <agent>` | Compose handoff context for `claude`/`codex`/`opencode`/`pi`/`omp` |
 | `agent-session history` | Recent events |
 | `agent-session context` | Print context (`-d, --depth summary|recent|full`) |
 | `agent-session doctor` | Health check: project, session, store, git |
 | `agent-session mcp` | Run the MCP server (`--transport stdio|streamable-http`, `--addr auto|host:port`) |
 | `agent-session plugin pack` | Build the Agent Plugin package |
-| `agent-session plugin install <agent>` | Wire an agent: `claude`, `codex`, `opencode`, `cursor`, `cline`, `pi` (`--scope project|user` for claude, opencode, cursor, pi) |
+| `agent-session plugin install <agent>` | Wire an agent: `claude`, `codex`, `opencode`, `cursor`, `cline`, `pi`, `omp` (`--scope project|user` for claude, opencode, cursor, pi, omp) |
 | `agent-session plugin uninstall <agent>` | Remove the wiring |
 | `agent-session setup` | Wire agents at user scope + AGENTS.md for always-on behavior (`--only`, `--project`) |
 | `agent-session task add\|list\|update` | Record tasks from the CLI (the MCP `task.*` tools without MCP) |
@@ -218,6 +218,14 @@ What `init` does (idempotent, safe to re-run):
     support"), so it is wired through the CLI instead: an extension resumes and
     checkpoints on pi's own lifecycle events, and a skill teaches the model the
     `task` / `decision` / `blocker` / `event` verbs. Nothing MCP is registered.
+  - **omp (oh-my-pi)** — `~/.omp/agent/mcp.json` + extension + skill + slash
+    commands. omp is a pi derivative that *does* ship an MCP client, so it gets
+    both halves: the MCP server for tool calls, and an extension that resumes on
+    `session_start` and checkpoints on `session_before_compact` /
+    `session_shutdown` so continuity does not depend on the model remembering.
+    Note the roots — omp reads `.omp/` and `~/.omp/agent/`, never `.pi/`, so pi's
+    wiring does nothing here. Named profiles (`omp --profile x`) read
+    `~/.omp/profiles/x/agent/` and are not covered by user-scope wiring.
 
 The MCP server resolves the project root from the working directory, so the
 same user-scope registration works in every project, with no per-project
@@ -225,10 +233,11 @@ config pollution.
 
 `init` also installs **slash commands** at user scope (Claude Code
 `~/.claude/commands/`, OpenCode `~/.config/opencode/commands/`, Cursor
-`~/.cursor/commands/`, pi `~/.pi/agent/prompts/`) so you can run `/agent-session`,
-`/agent-session-checkpoint`, and `/agent-session-record` in any project.
-`plugin uninstall <agent> --scope user` removes them. pi gets its own wording of
-the three: the shared set tells the agent to call MCP tools, which pi has none of.
+`~/.cursor/commands/`, pi `~/.pi/agent/prompts/`, omp `~/.omp/agent/commands/`) so
+you can run `/agent-session`, `/agent-session-checkpoint`, and
+`/agent-session-record` in any project. `plugin uninstall <agent> --scope user`
+removes them. pi gets its own wording of the three: the shared set tells the agent
+to call MCP tools, which pi has none of — omp uses the shared set, because it has.
 
 Prefer per-project wiring? Use `agent-session init --project`, or `--only <agent>`
 to wire a single agent into this project only. `--no-agents` keeps the session

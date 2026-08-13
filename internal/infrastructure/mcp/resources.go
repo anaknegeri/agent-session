@@ -29,7 +29,10 @@ func (s *Server) registerResources() {
 	resource("session://context", "Current context",
 		"Rendered context.md",
 		sessionResource(s, func(ctx context.Context, sessionID string) (any, error) {
-			return s.app.Context.Get(ctx, sessionID, "summary")
+			// Read, not Get: resources are read-only by contract, and Get syncs file
+			// changes and may auto-checkpoint. A client polling this resource was
+			// writing to the session on every poll while believing it only read.
+			return s.app.Context.Read(ctx, sessionID, "summary")
 		}))
 
 	resource("session://decisions", "Decisions",
@@ -55,7 +58,7 @@ func (s *Server) registerResources() {
 			if err != nil {
 				return nil, err
 			}
-			return resourceText(data)
+			return resourceText(req.Params.URI, data)
 		})
 
 	resource("session://checkpoint/latest", "Latest checkpoint",
@@ -75,7 +78,7 @@ func (s *Server) registerResources() {
 			if err != nil {
 				return nil, err
 			}
-			return resourceText(rows)
+			return resourceText(req.Params.URI, rows)
 		})
 }
 
@@ -93,19 +96,22 @@ func sessionResource(s *Server, fn func(ctx context.Context, sessionID string) (
 		if err != nil {
 			return nil, err
 		}
-		return resourceText(data)
+		return resourceText(req.Params.URI, data)
 	}
 }
 
-func resourceText(data any) ([]mcp.ResourceContents, error) {
+// resourceText wraps data as the contents of the requested URI. The URI has to
+// be echoed back: a client matches contents against the URI it asked for, and a
+// single hardcoded one labelled every resource as the same thing.
+func resourceText(uri string, data any) ([]mcp.ResourceContents, error) {
 	switch v := data.(type) {
 	case string:
 		return []mcp.ResourceContents{
-			mcp.TextResourceContents{URI: "session://resource", Text: v},
+			mcp.TextResourceContents{URI: uri, Text: v},
 		}, nil
 	case *entities.SessionEvent:
 		return []mcp.ResourceContents{
-			mcp.TextResourceContents{URI: "session://resource", Text: v.Type},
+			mcp.TextResourceContents{URI: uri, Text: v.Type},
 		}, nil
 	default:
 		raw, err := json.MarshalIndent(data, "", "  ")
@@ -113,7 +119,7 @@ func resourceText(data any) ([]mcp.ResourceContents, error) {
 			return nil, fmt.Errorf("marshal resource: %w", err)
 		}
 		return []mcp.ResourceContents{
-			mcp.TextResourceContents{URI: "session://resource", Text: string(raw)},
+			mcp.TextResourceContents{URI: uri, Text: string(raw)},
 		}, nil
 	}
 }

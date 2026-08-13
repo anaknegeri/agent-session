@@ -2,7 +2,6 @@ package opencode
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,75 +37,67 @@ func (a *Adapter) Detect(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// ConfigPath is the project config OpenCode reads. Detect accepts the .jsonc form
+// too, and when that is the file the project standardized on, writing a second
+// .json beside it would leave the wiring in a file the user does not maintain.
+func (a *Adapter) ConfigPath() string {
+	jsonc := filepath.Join(a.projectRoot, "opencode.jsonc")
+	if _, err := os.Stat(jsonc); err == nil {
+		return jsonc
+	}
+	return filepath.Join(a.projectRoot, "opencode.json")
+}
+
 func (a *Adapter) Configure(ctx context.Context, mcpCommand string) error {
-	path := filepath.Join(a.projectRoot, "opencode.json")
-	data, err := os.ReadFile(path)
+	path := a.ConfigPath()
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
-		data = []byte("{}")
-	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		config = map[string]any{}
+		return err
 	}
 
-	mcpServers, _ := config["mcp"].(map[string]any)
-	if mcpServers == nil {
-		mcpServers = map[string]any{}
-	}
-	mcpServers["agent-session"] = map[string]any{
-		"type":    "local",
-		"command": []string{mcpCommand, "mcp"},
-		"enabled": true,
-		"environment": map[string]string{
-			"AGENT_SESSION_AGENT": "opencode",
-		},
-	}
-	config["mcp"] = mcpServers
+	entry := agent.Section(agent.Section(config, "mcp"), "agent-session")
+	entry["type"] = "local"
+	entry["command"] = []any{mcpCommand, "mcp"}
+	entry["enabled"] = true
+	agent.Section(entry, "environment")["AGENT_SESSION_AGENT"] = "opencode"
 
-	// always-on instructions: read the session at start, checkpoint at end
-	agentCfg, _ := config["agent"].(map[string]any)
-	if agentCfg == nil {
-		agentCfg = map[string]any{}
-	}
-	agentCfg["instructions"] = map[string]any{
-		"system": SystemInstructions,
-	}
-	config["agent"] = agentCfg
+	// Appended, never assigned: agent.instructions.system is where the user keeps
+	// their own always-on prompt, and this is the only copy of it.
+	MergeInstructions(config, SystemInstructions)
 
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal opencode.json: %w", err)
-	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
-		return fmt.Errorf("write opencode.json: %w", err)
-	}
-	return nil
+	return agent.WriteJSONConfig(path, config)
 }
 
 func (a *Adapter) Install(ctx context.Context) error {
 	return nil
 }
 
+// Uninstall removes our MCP entry and our instruction note, leaving every other
+// server, setting and custom instruction in place.
 func (a *Adapter) Uninstall(ctx context.Context) error {
-	path := filepath.Join(a.projectRoot, "opencode.json")
-	data, err := os.ReadFile(path)
+	path := a.ConfigPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
+		return err
+	}
+	servers, _ := config["mcp"].(map[string]any)
+	if servers != nil {
+		delete(servers, "agent-session")
+		if len(servers) == 0 {
+			delete(config, "mcp")
+		}
+	}
+	RemoveInstructions(config, SystemInstructions)
+	if len(config) == 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
 		return nil
 	}
-	var config map[string]any
-	if err := json.Unmarshal(data, &config); err != nil {
-		return nil
-	}
-	mcpServers, _ := config["mcp"].(map[string]any)
-	if mcpServers == nil {
-		return nil
-	}
-	delete(mcpServers, "agent-session")
-	out, err := json.MarshalIndent(config, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal opencode.json: %w", err)
-	}
-	return os.WriteFile(path, out, 0o644)
+	return agent.WriteJSONConfig(path, config)
 }
 
 var _ agent.Adapter = (*Adapter)(nil)

@@ -3,13 +3,20 @@ package contract_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
+
 	"github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
+	agentsession "github.com/anaknegeri/agent-session/internal/infrastructure/mcp"
+	"github.com/anaknegeri/agent-session/pkg/logger"
 )
 
 // eventTypesV1 is the canonical event type namespace of Event Schema v1
@@ -168,7 +175,7 @@ func TestFileChangedPayloadV1(t *testing.T) {
 	ctx := context.Background()
 	sessionID := activeSession(t, app)
 
-	if err := app.Event.Append(ctx, sessionID, "claude", entities.EventFileChanged, `{"files":["a.go"]}`); err != nil {
+	if err := app.Artifact.AppendEvent(ctx, sessionID, "claude", entities.EventFileChanged, `{"files":["a.go"]}`); err != nil {
 		t.Fatalf("append file.changed: %v", err)
 	}
 	events, err := app.Event.List(ctx, sessionID, 50)
@@ -235,17 +242,76 @@ func TestLargePayloadBecomesArtifactRefV1(t *testing.T) {
 	t.Fatal("test.failed event not found")
 }
 
-// TestNonCanonicalEventTypeRejectedV1 keeps the namespace closed on the write
-// path that guards it. An open namespace would make the type set above a
-// description of habit rather than a contract.
+// TestNonCanonicalEventTypeRejectedV1 keeps the namespace closed on every path an
+// event can reach the log through. The check lived on one write path while a
+// second, unvalidated one existed beside it, so "the namespace is closed" held
+// only for callers that happened to pick the guarded path — and the type table
+// above described habit rather than a contract.
+//
+// Each path is also driven with a canonical type: a path that rejects everything
+// would satisfy the rejection assertion while accepting nothing at all.
 func TestNonCanonicalEventTypeRejectedV1(t *testing.T) {
 	app := newProject(t)
 	ctx := context.Background()
 	sessionID := activeSession(t, app)
 
-	if err := app.Artifact.AppendEvent(ctx, sessionID, "claude", "made.up", `{}`); err == nil {
-		t.Error("a non-canonical event type was accepted")
+	// The service path. The CLI's `event add` and both MCP tools below funnel
+	// through it, and it is the only append the application layer exposes.
+	if err := app.Artifact.AppendEvent(ctx, sessionID, "claude", "made.up", `{}`); !errors.Is(err, domainerr.ErrInvalidEventType) {
+		t.Errorf("service append accepted a non-canonical type, got err %v", err)
 	}
+	if err := app.Artifact.AppendEvent(ctx, sessionID, "claude", entities.EventCommandExecuted, `{}`); err != nil {
+		t.Fatalf("service append rejected a canonical type: %v", err)
+	}
+
+	c := connect(t, agentsession.New(app.Root, logger.New("error")))
+	for _, tool := range []struct {
+		name    string
+		typeArg string
+	}{
+		{"event.append", "type"},
+		{"session.record", "event_type"},
+	} {
+		text, failed := callToolV1(t, c, tool.name, map[string]any{tool.typeArg: "made.up"})
+		if !failed {
+			t.Errorf("%s accepted a non-canonical event type: %s", tool.name, text)
+		}
+		if text, failed := callToolV1(t, c, tool.name, map[string]any{tool.typeArg: entities.EventCommandExecuted}); failed {
+			t.Fatalf("%s rejected a canonical type: %s", tool.name, text)
+		}
+	}
+
+	// A rejection that still writes the row would leave readers matching on a
+	// type the table does not list, which is the damage the check exists to stop.
+	events, err := app.Event.List(ctx, sessionID, 200)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	for _, ev := range events {
+		if !entities.IsCanonicalEventType(ev.Type) {
+			t.Errorf("a rejected append still reached the log as %q", ev.Type)
+		}
+	}
+}
+
+// callToolV1 reports the tool output and whether the tool signalled failure. A
+// tool error is carried in the result, not returned as a transport error.
+func callToolV1(t *testing.T, c *client.Client, name string, args map[string]any) (string, bool) {
+	t.Helper()
+	req := mcp.CallToolRequest{}
+	req.Params.Name = name
+	req.Params.Arguments = args
+	res, err := c.CallTool(context.Background(), req)
+	if err != nil {
+		t.Fatalf("call %s: %v", name, err)
+	}
+	var b strings.Builder
+	for _, content := range res.Content {
+		if tc, ok := content.(mcp.TextContent); ok {
+			b.WriteString(tc.Text)
+		}
+	}
+	return b.String(), res.IsError
 }
 
 func sortedStrings(m map[string][]string) []string {

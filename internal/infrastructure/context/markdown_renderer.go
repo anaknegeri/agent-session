@@ -31,8 +31,14 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 	}
 	b.WriteString("\n\n")
 
+	// Repository is filepath.Base of a checkout directory and Branch comes from
+	// git, so neither is prose — but a directory name may legally contain a
+	// newline, and these render above the trust legend where a forged heading
+	// would look like the session layer's own output.
 	fmt.Fprintf(&b, "**Project:** %s · **Branch:** %s · **Status:** %s\n",
-		snapshot.Workspace.Repository, snapshot.Workspace.Branch, snapshot.Session.Status)
+		untrusted(snapshot.Workspace.Repository, budget.MaxItemChars),
+		untrusted(snapshot.Workspace.Branch, budget.MaxItemChars),
+		snapshot.Session.Status)
 	if snapshot.Workspace.Commit != "" {
 		fmt.Fprintf(&b, "**Commit:** %s", snapshot.Workspace.Commit)
 		if snapshot.Workspace.Dirty {
@@ -41,7 +47,11 @@ func (r *renderer) RenderContext(snapshot *entities.Snapshot, budget ports.Conte
 		b.WriteString("\n")
 	}
 	if snapshot.LastAgent != "" {
-		fmt.Fprintf(&b, "**Last agent:** %s\n", snapshot.LastAgent)
+		// The agent name arrives from `resume --agent` and from the session.resume
+		// tool argument, so it is agent-supplied like everything else. Services
+		// normalize it on the way in; flattening here keeps a row written by an
+		// older build, or imported from another project, from forging a section.
+		fmt.Fprintf(&b, "**Last agent:** %s\n", untrusted(snapshot.LastAgent, budget.MaxItemChars))
 	}
 
 	// Placed before any untrusted content so a clamped summary can never drop the
@@ -199,13 +209,21 @@ func (r *renderer) RenderHandoff(snapshot *entities.Snapshot, to string, budget 
 		fmt.Fprintf(&b, "Task:\n- %s\n\n", untrusted(snapshot.Session.Title, budget.MaxItemChars))
 	}
 	if snapshot.LastAgent != "" {
-		fmt.Fprintf(&b, "Previous agent:\n%s\n\n", snapshot.LastAgent)
+		// Rendered on its own line, so an unflattened name would forge a section in
+		// the document pasted straight into the next agent's prompt.
+		fmt.Fprintf(&b, "Previous agent:\n%s\n\n", untrusted(snapshot.LastAgent, budget.MaxItemChars))
 	}
 
 	if len(snapshot.Progress.Completed) > 0 {
 		b.WriteString("Completed:\n")
-		for _, item := range snapshot.Progress.Completed {
+		// handoff-v1.md promises the same budget as context.get: without the item
+		// limit a 200-entry progress list lands unbounded in the next agent's prompt.
+		limit := limit(len(snapshot.Progress.Completed), budget.MaxProgress)
+		for _, item := range snapshot.Progress.Completed[:limit] {
 			fmt.Fprintf(&b, "- %s\n", untrusted(item, budget.MaxItemChars))
+		}
+		if limit < len(snapshot.Progress.Completed) {
+			fmt.Fprintf(&b, "- … +%d more\n", len(snapshot.Progress.Completed)-limit)
 		}
 		b.WriteString("\n")
 	}

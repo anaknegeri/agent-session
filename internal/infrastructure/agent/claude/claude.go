@@ -2,7 +2,6 @@ package claude
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -35,108 +34,86 @@ func (a *Adapter) Detect(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// SettingsPath is the project settings file Claude Code merges over the user one.
+func (a *Adapter) SettingsPath() string {
+	return filepath.Join(a.projectRoot, ".claude", "settings.json")
+}
+
+// RulePath is the project memory file Claude Code reads.
+func (a *Adapter) RulePath() string {
+	return filepath.Join(a.projectRoot, ".claude", "CLAUDE.md")
+}
+
+// MCPPath is the committed per-project MCP config Claude Code discovers.
+func (a *Adapter) MCPPath() string { return filepath.Join(a.projectRoot, ".mcp.json") }
+
+// Configure registers the MCP server in .mcp.json, merging into whatever is
+// already there. That file is normally committed and shared, so it routinely
+// holds other servers: rewriting it from scratch would delete them.
 func (a *Adapter) Configure(ctx context.Context, mcpCommand string) error {
-	config := map[string]any{
-		"mcpServers": map[string]any{
-			"agent-session": map[string]any{
-				"type":    "stdio",
-				"command": mcpCommand,
-				"args":    []string{"mcp"},
-				"env": map[string]string{
-					"AGENT_SESSION_AGENT": "claude",
-				},
-			},
-		},
-	}
-	data, err := json.MarshalIndent(config, "", "  ")
+	path := a.MCPPath()
+	config, err := agent.ReadJSONConfig(path)
 	if err != nil {
-		return fmt.Errorf("marshal .mcp.json: %w", err)
+		return err
 	}
-	path := filepath.Join(a.projectRoot, ".mcp.json")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write .mcp.json: %w", err)
-	}
-	return nil
+	entry := agent.Section(agent.Section(config, "mcpServers"), "agent-session")
+	entry["type"] = "stdio"
+	entry["command"] = mcpCommand
+	entry["args"] = []any{"mcp"}
+	agent.Section(entry, "env")["AGENT_SESSION_AGENT"] = "claude"
+	return agent.WriteJSONConfig(path, config)
 }
 
+// Install merges the lifecycle hooks into .claude/settings.json and appends the
+// Agent Session section to .claude/CLAUDE.md. Both files belong to the project,
+// not to us: settings.json commonly carries permissions, model and env, and
+// CLAUDE.md is the project's own memory.
 func (a *Adapter) Install(ctx context.Context) error {
-	settingsDir := filepath.Join(a.projectRoot, ".claude")
-	if err := os.MkdirAll(settingsDir, 0o755); err != nil {
-		return fmt.Errorf("create .claude dir: %w", err)
+	if err := EnsureHooks(a.SettingsPath()); err != nil {
+		return err
 	}
-
-	settings := map[string]any{
-		"hooks": map[string]any{
-			"SessionStart": []map[string]any{
-				{
-					"matcher": "*",
-					"hooks": []map[string]any{
-						{
-							"type":    "command",
-							"command": "agent-session resume --agent claude",
-						},
-					},
-				},
-			},
-			"Stop": []map[string]any{
-				{
-					"matcher": "*",
-					"hooks": []map[string]any{
-						{
-							"type":    "command",
-							"command": "agent-session checkpoint --label auto",
-						},
-					},
-				},
-			},
-			"PreCompact": []map[string]any{
-				{
-					"matcher": "*",
-					"hooks": []map[string]any{
-						{
-							"type":    "command",
-							"command": "agent-session checkpoint --label precompact",
-						},
-					},
-				},
-			},
-		},
-	}
-	data, err := json.MarshalIndent(settings, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal claude settings: %w", err)
-	}
-	path := filepath.Join(settingsDir, "settings.json")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return fmt.Errorf("write claude settings: %w", err)
-	}
-
-	claudeMD := []byte(`# Agent Session
-
-This project uses Agent Session (agent-session) as its session layer.
-
-- At the start of a session, FIRST call the agent-session MCP tools in order:
-  session.get, then context.get. Continue the existing task; do not start from scratch.
-- The context summary is a bounded preview (token savings). Call
-  ` + "`context.get depth=full`" + ` whenever you need complete decisions, blockers,
-  changed files, or events — never act on incomplete info when detail is one call away.
-- Record work as you go: task.create / task.update, decision.create, blocker.create,
-  and event.append for test results (test.failed / test.passed).
-- Before finishing (Stop), create a checkpoint with session.checkpoint including next_action.
-- To keep context small, summarize before finishing: call context.summarize, then
-  store the summary with memory.put (kind=project_knowledge).
-`)
-	if err := os.WriteFile(filepath.Join(settingsDir, "CLAUDE.md"), claudeMD, 0o644); err != nil {
-		return fmt.Errorf("write CLAUDE.md: %w", err)
+	if _, err := EnsureRule(a.RulePath(), ProjectRule); err != nil {
+		return err
 	}
 	return nil
 }
 
+// Uninstall removes exactly what Configure and Install added: our MCP entry, our
+// hook entries, our rule section. Files that held something else survive.
 func (a *Adapter) Uninstall(ctx context.Context) error {
-	_ = os.Remove(filepath.Join(a.projectRoot, ".mcp.json"))
-	_ = os.Remove(filepath.Join(a.projectRoot, ".claude", "settings.json"))
-	_ = os.Remove(filepath.Join(a.projectRoot, ".claude", "CLAUDE.md"))
-	return nil
+	if err := a.removeMCP(); err != nil {
+		return err
+	}
+	if err := RemoveHooks(a.SettingsPath()); err != nil {
+		return err
+	}
+	return RemoveRule(a.RulePath(), ProjectRule)
+}
+
+func (a *Adapter) removeMCP() error {
+	path := a.MCPPath()
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil
+	}
+	config, err := agent.ReadJSONConfig(path)
+	if err != nil {
+		return err
+	}
+	servers, ok := config["mcpServers"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	delete(servers, "agent-session")
+	if len(servers) == 0 {
+		delete(config, "mcpServers")
+	}
+	if len(config) == 0 {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("remove %s: %w", path, err)
+		}
+		return nil
+	}
+	return agent.WriteJSONConfig(path, config)
 }
 
 var _ agent.Adapter = (*Adapter)(nil)

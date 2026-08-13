@@ -23,7 +23,7 @@ func TestTestsStateLatestRun(t *testing.T) {
 
 	appendEvent := func(typ string) {
 		t.Helper()
-		if err := fx.app.Event.Append(ctx, sessionID, "claude", typ, ""); err != nil {
+		if err := fx.app.Artifact.AppendEvent(ctx, sessionID, "claude", typ, ""); err != nil {
 			t.Fatalf("append %s: %v", typ, err)
 		}
 	}

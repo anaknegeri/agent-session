@@ -72,7 +72,7 @@ func TestPiSmoke(t *testing.T) {
 	// before_agent_start injects the rendered context as a persistent session
 	// entry, which is the only half of the integration that reaches the model.
 	// pi stores it in the session file, so it is assertable without a model run.
-	if !piSessionContainsInjectedContext(t, sessionDir) {
+	if !sessionContainsInjectedContext(t, sessionDir) {
 		t.Errorf("before_agent_start injected no agent-session context into the pi session\npi output: %s", out)
 	}
 }
@@ -130,9 +130,10 @@ func latestSessionAgent(t *testing.T, dir string) string {
 	return session.LastAgent
 }
 
-// piSessionContainsInjectedContext reports whether any session file pi wrote
-// carries the custom entry the extension injects.
-func piSessionContainsInjectedContext(t *testing.T, sessionDir string) bool {
+// sessionContainsInjectedContext reports whether any session file the agent wrote
+// carries the custom entry the extension injects. pi and omp share the entry
+// shape because they share the extension API.
+func sessionContainsInjectedContext(t *testing.T, sessionDir string) bool {
 	t.Helper()
 	found := false
 	err := filepath.WalkDir(sessionDir, func(path string, d os.DirEntry, err error) error {
@@ -149,7 +150,7 @@ func piSessionContainsInjectedContext(t *testing.T, sessionDir string) bool {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("walk pi session dir: %v", err)
+		t.Fatalf("walk session dir: %v", err)
 	}
 	return found
 }

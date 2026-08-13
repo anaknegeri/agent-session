@@ -172,7 +172,7 @@ func TestRemoveGlobalRule(t *testing.T) {
 	}
 	path := filepath.Join(home, ".claude", "CLAUDE.md")
 	data, _ := os.ReadFile(path)
-	if strings.Contains(string(data), globalRuleSection) {
+	if strings.Contains(string(data), ruleSection) {
 		t.Fatalf("expected section to be removed: %s", data)
 	}
 

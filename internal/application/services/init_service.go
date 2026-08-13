@@ -9,6 +9,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/pkg/ids"
+	"github.com/anaknegeri/agent-session/pkg/safetext"
 )
 
 type InitResult struct {
@@ -34,6 +35,9 @@ func (s *InitService) Init(ctx context.Context, dir, agent string) (*InitResult,
 	if err != nil {
 		return nil, domainerr.ErrNotGitRepo
 	}
+	// Stored as an identifier for the same reason SessionService.Start does it: the
+	// name is rendered as the session layer's own assertion, not as agent prose.
+	agent = safetext.Identifier(agent)
 
 	projectName := filepath.Base(dir)
 	workspace := ports.WorkspaceStatus{}

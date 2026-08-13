@@ -8,6 +8,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/pkg/ids"
+	"github.com/anaknegeri/agent-session/pkg/safetext"
 )
 
 type SessionService struct {
@@ -49,6 +50,11 @@ func (s *SessionService) Start(ctx context.Context, projectID, title, agent stri
 	if err != nil {
 		return nil, err
 	}
+	// The agent name is caller-supplied (--agent, the session.resume tool argument,
+	// AGENT_SESSION_AGENT) but the rendered context and the handoff document present
+	// it as the session layer's own assertion, so it is stored as a single-line
+	// identifier and never as prose that could forge a section.
+	agent = safetext.Identifier(agent)
 
 	session := &entities.Session{
 		ID:        ids.New("sess"),
@@ -106,6 +112,7 @@ func (s *SessionService) Resume(ctx context.Context, projectID, agent string) (*
 	if err != nil {
 		return nil, err
 	}
+	agent = safetext.Identifier(agent)
 	// Reviving the session, attaching the agent and swapping the agent session are
 	// one state change: a session left active whose agent session never opened
 	// reads as "an agent is working on this" with nothing behind it.

@@ -86,6 +86,109 @@ func TestCheckpointRowShapeV1(t *testing.T) {
 	assertShape(t, "Checkpoint", "docs/spec/checkpoint-v1.md", checkpointRowV1, got)
 }
 
+// TestSnapshotKeysAlwaysPresentV1 holds the one clause the shape tests structurally
+// cannot see. jsonShape walks struct tags and jsonName drops everything after the
+// comma, so `omitempty` is invisible to it — and `omitempty` is exactly what
+// decides whether a key is there. checkpoint-v1.md: "`nudges` is omitted when
+// empty. Every other key is always present; empty means empty string, zero or an
+// empty array, never absent."
+//
+// The reader this protects is the one the spec is written for: something in another
+// language reading `.agent/session.db`, or the model receiving a checkpoint from
+// session.checkpoint, told to expect an array and handed `null` or nothing.
+func TestSnapshotKeysAlwaysPresentV1(t *testing.T) {
+	data, err := json.Marshal(entities.Snapshot{})
+	if err != nil {
+		t.Fatalf("marshal empty snapshot: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("empty snapshot is not JSON: %v", err)
+	}
+
+	for _, key := range topLevelKeysV1() {
+		if key == "nudges" {
+			if _, ok := raw[key]; ok {
+				t.Errorf("`nudges` renders when empty; v1 says it is the one omitted key:\n%s", data)
+			}
+			continue
+		}
+		if _, ok := raw[key]; !ok {
+			t.Errorf("an empty snapshot omits %q, so a reader told it is always present finds nothing\n see docs/spec/checkpoint-v1.md\n%s", key, data)
+		}
+	}
+
+	// Nested objects are values, not optional sections: a snapshot with no task
+	// still has to carry `task.id`, or "empty means empty string" is not true.
+	for _, path := range []string{
+		"session.id", "session.title", "session.status",
+		"workspace.repository", "workspace.branch", "workspace.commit", "workspace.dirty",
+		"task.id", "task.title", "task.status",
+		"tests.status", "tests.failures",
+	} {
+		parent, key, _ := strings.Cut(path, ".")
+		object, ok := raw[parent].(map[string]any)
+		if !ok {
+			t.Errorf("%q is not an object in an empty snapshot: %v", parent, raw[parent])
+			continue
+		}
+		if _, ok := object[key]; !ok {
+			t.Errorf("an empty snapshot omits %q\n see docs/spec/checkpoint-v1.md\n%s", path, data)
+		}
+	}
+
+	// `null` is not an empty array. The stores hand back nil slices for "nothing
+	// recorded yet", so this is the difference the marshaller has to erase.
+	for _, path := range []string{
+		"decisions", "blockers",
+		"progress.completed", "progress.pending", "progress.tasks",
+		"files.modified",
+	} {
+		value := lookupPath(t, raw, path)
+		list, ok := value.([]any)
+		if !ok {
+			t.Errorf("%q is %v in an empty snapshot, want an empty array\n%s", path, value, data)
+			continue
+		}
+		if len(list) != 0 {
+			t.Errorf("%q is not empty in an empty snapshot: %v", path, list)
+		}
+	}
+}
+
+// topLevelKeysV1 derives the expected top-level key set from the frozen shape, so
+// a field added to the snapshot has to be added to snapshotV1 (and to the spec)
+// before this test can pass — the same gate the shape tests apply.
+func topLevelKeysV1() []string {
+	seen := map[string]bool{}
+	keys := make([]string, 0, len(snapshotV1))
+	for _, entry := range snapshotV1 {
+		path, _, _ := strings.Cut(entry, " ")
+		top, _, _ := strings.Cut(path, ".")
+		top = strings.TrimSuffix(top, "[]")
+		if seen[top] {
+			continue
+		}
+		seen[top] = true
+		keys = append(keys, top)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func lookupPath(t *testing.T, raw map[string]any, path string) any {
+	t.Helper()
+	parent, key, nested := strings.Cut(path, ".")
+	if !nested {
+		return raw[parent]
+	}
+	object, ok := raw[parent].(map[string]any)
+	if !ok {
+		t.Fatalf("%q is not an object: %v", parent, raw[parent])
+	}
+	return object[key]
+}
+
 // TestCheckpointKindsV1 freezes the kind vocabulary. Retention is applied per
 // kind, so an unknown kind is unbounded growth and a renamed one silently loses
 // the limit that was protecting the deliberate checkpoints.
