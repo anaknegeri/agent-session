@@ -29,7 +29,7 @@ var handoffLabelsV1 = []string{
 
 // handoffTargetsV1 is the set of agents `handoff` accepts. Asking for an
 // unsupported one has to fail rather than render a document for nobody.
-var handoffTargetsV1 = []string{"claude", "codex", "opencode"}
+var handoffTargetsV1 = []string{"claude", "codex", "opencode", "pi"}
 
 func TestHandoffDocumentV1(t *testing.T) {
 	renderer := ctxrender.NewRenderer()

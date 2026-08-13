@@ -16,6 +16,7 @@ breaks.
 | OpenCode | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via instructions only | 🟡 |
 | Cursor | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via rules only | 🟡 |
 | Cline | 🟡 | 🟡 | 🟡 | ⚠ | ⚠ via rules only | — |
+| pi | ❌ none shipped | ✅ via CLI | ✅ | 🟡 | ✅ extension lifecycle | 🟡 |
 
 ## Legend
 
@@ -38,6 +39,7 @@ breaks.
 | `TestCodexSmoke` | Codex | `init --only codex` registers `[mcp_servers.agent-session]` in the config under `CODEX_HOME` (isolated in a temp dir, so this is attributable); a real `codex exec` run then leaves the session store intact | yes |
 | `TestCrossAgentHandoffSmoke` | Claude Code → Codex | a marker task Claude records through MCP survives `handoff codex` in the same session, and Codex — a separate CLI, separate process, its own MCP server — reports that task back | yes |
 | `TestReadOnlyToolsDoNotWrite` | any MCP client | every tool advertising `readOnlyHint` leaves the session fingerprint (session, last agent, current task, event/checkpoint/task/decision/memory counts) untouched | no |
+| `TestPiSmoke` | pi | `init --project --only pi` writes `.pi/extensions/agent-session.ts`, `.pi/skills/agent-session/SKILL.md` and `.pi/prompts/*.md`; a real `pi` run then sets `last_agent` to `pi` (session_start), injects the rendered context into the pi session as a `customType: "agent-session"` entry (before_agent_start), and leaves a checkpoint labelled `auto` (session_shutdown) | yes |
 
 ### Attribution caveat for the Claude smoke test
 
@@ -80,6 +82,11 @@ its behavioural half carries the caveat above. The Codex run needed one retry:
 the first attempt hit an upstream `Selected model is at capacity` error and
 skipped, which is the intended behaviour of the skip path.
 
+`TestPiSmoke` passed on 13 August 2026 against pi 0.84.1 (1.6s, no credentials).
+The negative half was checked too: pointing the extension's `session_start` at a
+non-existent command makes it fail with `last agent is "cli"` and no injected
+context, so the ✅ cells are held by assertions that break when the wiring does.
+
 `TestCrossAgentHandoffSmoke` passed on 13 August 2026 (Claude Code → codex-cli
 0.147.0, 32s). Codex keeps its MCP registration at user scope only, so this test
 reads the developer's real `~/.codex`: it never writes there, and it skips when
@@ -87,6 +94,33 @@ the registration is missing. It also skips when the *installed* binary Codex is
 configured to launch does not yet expose `context.read`, since that would fail the
 agent for a capability the server never advertised — the run above needed the
 working tree's build installed to exercise it.
+
+### pi has no MCP, and that is not a gap
+
+pi ships no MCP client on purpose: "No MCP. Build CLI tools with READMEs (see
+Skills), or build an extension that adds MCP support." So the `MCP tools` cell is
+❌ rather than ⚠ — there is nothing to wire. The integration is the pi analogue of
+hooks instead: `.pi/extensions/agent-session.ts` calls the `agent-session` CLI on
+`session_start` (resume), `before_agent_start` (inject the rendered context),
+`session_before_compact` and `session_shutdown` (checkpoint). Recording is the
+CLI's `task` / `decision` / `blocker` / `event` verbs, described to the model by a
+skill rather than by a tool list.
+
+`TestPiSmoke` is the one smoke test that needs **no credentials**: pi runs
+`session_start` and `before_agent_start` before it contacts a provider and
+`session_shutdown` after, so an intentionally invalid API key exercises every
+hook while the model never runs. It costs nothing and cannot touch the
+repository, which is why the hook and checkpoint cells are ✅ on a gated test.
+The `session_before_compact` handler is the same code path as shutdown but is not
+separately asserted — reaching a compaction needs a real conversation.
+
+Slash commands stay 🟡: the prompt templates are written to the directory pi
+documents, and the files are asserted, but nothing drives `/agent-session`
+through pi's TUI. pi's project-local resources — extensions, skills and prompts
+under `.pi/` — load only after the user trusts the project, the same shape of
+gate as Codex's `trusted_hash`. agent-session never writes that trust record;
+user scope (`~/.pi/agent/`) needs no trust and the extension guards itself by
+looking for `.agent/` before doing anything.
 
 ### Not covered
 
@@ -114,6 +148,8 @@ working tree's build installed to exercise it.
   their agent. `agent-session init` prints the one-time approval step instead.
   What remains unverified is the post-approval run.
 - **Cursor and Cline.** Wiring is generated and manually checked; no smoke test.
+- **pi compaction.** `session_before_compact` checkpoints through the same helper
+  as `session_shutdown`, which is covered, but no test reaches a real compaction.
 
 ## How to run the smoke tests
 

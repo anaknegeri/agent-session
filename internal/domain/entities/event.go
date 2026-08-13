@@ -1,5 +1,7 @@
 package entities
 
+import "sort"
+
 const (
 	EventSessionStarted    = "session.started"
 	EventTaskCreated       = "task.created"
@@ -35,6 +37,17 @@ var canonicalEventTypes = map[string]bool{
 // IsCanonicalEventType reports whether t is one of the documented event types (PRD §14.3).
 func IsCanonicalEventType(t string) bool {
 	return canonicalEventTypes[t]
+}
+
+// CanonicalEventTypes returns the documented event types in sorted order, for
+// callers that have to tell a human which values are accepted.
+func CanonicalEventTypes() []string {
+	types := make([]string, 0, len(canonicalEventTypes))
+	for t := range canonicalEventTypes {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	return types
 }
 
 type SessionEvent struct {

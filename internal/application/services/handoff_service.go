@@ -16,6 +16,7 @@ var supportedHandoffAgents = map[string]bool{
 	"claude":   true,
 	"codex":    true,
 	"opencode": true,
+	"pi":       true,
 }
 
 type HandoffService struct {

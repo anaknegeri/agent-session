@@ -35,7 +35,7 @@ of the work. One binary, one SQLite file per project, no daemon.
 ## Features
 
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
-- **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline.
+- **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline, pi.
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
 - **MCP-native** — 25 tools + 7 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
@@ -170,15 +170,19 @@ or `--only claude|opencode|codex` to wire a single agent.
 | `agent-session watch` | Auto-regenerate context.md when the session changes (`-i, --interval`) |
 | `agent-session resume` | Resume the latest session (`-a, --agent`) |
 | `agent-session checkpoint` | Create a checkpoint (`--label`, `-n, --next-action`) |
-| `agent-session handoff <agent>` | Compose handoff context for `claude`/`codex`/`opencode` |
+| `agent-session handoff <agent>` | Compose handoff context for `claude`/`codex`/`opencode`/`pi` |
 | `agent-session history` | Recent events |
 | `agent-session context` | Print context (`-d, --depth summary|recent|full`) |
 | `agent-session doctor` | Health check: project, session, store, git |
 | `agent-session mcp` | Run the MCP server (`--transport stdio|streamable-http`, `--addr auto|host:port`) |
 | `agent-session plugin pack` | Build the Agent Plugin package |
-| `agent-session plugin install <agent>` | Wire an agent: `claude`, `codex`, `opencode`, `cursor`, `cline` (`--scope project|user` for claude) |
+| `agent-session plugin install <agent>` | Wire an agent: `claude`, `codex`, `opencode`, `cursor`, `cline`, `pi` (`--scope project|user` for claude, opencode, cursor, pi) |
 | `agent-session plugin uninstall <agent>` | Remove the wiring |
 | `agent-session setup` | Wire agents at user scope + AGENTS.md for always-on behavior (`--only`, `--project`) |
+| `agent-session task add\|list\|update` | Record tasks from the CLI (the MCP `task.*` tools without MCP) |
+| `agent-session decision add\|list` | Record a decision (`-r, --reason`) |
+| `agent-session blocker add\|list\|resolve` | Record and resolve blockers (`--open`) |
+| `agent-session event add <type>` | Append a canonical event (`-p, --payload`) |
 | `agent-session memory put <content>` | Store knowledge (`-k kind`) |
 | `agent-session memory list` | List knowledge (`-k kind`, `-n limit`) |
 | `agent-session memory search <query>` | Full-text search knowledge |
@@ -209,6 +213,11 @@ What `init` does (idempotent, safe to re-run):
   - **Codex** — `codex mcp add agent-session` (global by default)
   - **Cursor** — `~/.cursor/mcp.json`
   - **Cline** — no user scope; wire per-project with `--only cline`
+  - **pi** — `~/.pi/agent/` extension + skill + prompts. pi ships **no MCP**
+    ("No MCP. Build CLI tools with READMEs, or build an extension that adds MCP
+    support"), so it is wired through the CLI instead: an extension resumes and
+    checkpoints on pi's own lifecycle events, and a skill teaches the model the
+    `task` / `decision` / `blocker` / `event` verbs. Nothing MCP is registered.
 
 The MCP server resolves the project root from the working directory, so the
 same user-scope registration works in every project, with no per-project
@@ -216,9 +225,10 @@ config pollution.
 
 `init` also installs **slash commands** at user scope (Claude Code
 `~/.claude/commands/`, OpenCode `~/.config/opencode/commands/`, Cursor
-`~/.cursor/commands/`) so you can run `/agent-session`, `/agent-session-checkpoint`,
-and `/agent-session-record` in any project. `plugin uninstall <agent> --scope user`
-removes them.
+`~/.cursor/commands/`, pi `~/.pi/agent/prompts/`) so you can run `/agent-session`,
+`/agent-session-checkpoint`, and `/agent-session-record` in any project.
+`plugin uninstall <agent> --scope user` removes them. pi gets its own wording of
+the three: the shared set tells the agent to call MCP tools, which pi has none of.
 
 Prefer per-project wiring? Use `agent-session init --project`, or `--only <agent>`
 to wire a single agent into this project only. `--no-agents` keeps the session

@@ -92,7 +92,7 @@ func newCheckpointCmd() *cobra.Command {
 func newHandoffCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "handoff <agent>",
-		Short: "Create handoff context for another agent (claude, codex, opencode)",
+		Short: "Create handoff context for another agent (claude, codex, opencode, pi)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app := open()

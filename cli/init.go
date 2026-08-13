@@ -75,7 +75,7 @@ func newInitCmd() *cobra.Command {
 					wired++
 				}
 				if wired == 0 {
-					yellow("- no agent CLIs detected (claude, opencode, codex, cursor)\n")
+					yellow("- no agent CLIs detected (claude, opencode, codex, cursor, pi)\n")
 					yellow("  AGENTS.md still covers any agent that reads it. Re-run `init --only <agent>` after installing one.\n")
 				}
 			} else if projectScope {
@@ -87,7 +87,7 @@ func newInitCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&only, "only", "", "Only wire one agent: claude | opencode | codex | cursor | cline")
+	cmd.Flags().StringVar(&only, "only", "", "Only wire one agent: claude | opencode | codex | cursor | cline | pi")
 	cmd.Flags().BoolVar(&noAgents, "no-agents", false, "Session layer only, skip agent wiring")
 	cmd.Flags().BoolVar(&projectScope, "project", false, "Write per-project agent config instead of user scope")
 	return cmd
@@ -119,6 +119,12 @@ func installAgentGlobal(bin, name string) {
 		green("✓ cursor: registered in ~/.cursor/mcp.json\n")
 	case "cline":
 		red("✗ cline has no user scope; use `init --only cline` for per-project wiring\n")
+	case "pi":
+		if err := installPiGlobal(bin); err != nil {
+			red("✗ pi: %v\n", err)
+			return
+		}
+		green("✓ pi: ~/.pi/agent extension + skill + prompts (CLI, not MCP — pi ships none)\n")
 	default:
 		red("✗ unknown agent %q\n", name)
 	}
@@ -136,6 +142,8 @@ func installAgent(dir, bin, name string) {
 		installCursor(dir, bin)
 	case "cline":
 		installCline(dir, bin)
+	case "pi":
+		installPi(dir, bin)
 	default:
 		red("✗ unknown agent %q\n", name)
 	}

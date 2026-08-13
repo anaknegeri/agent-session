@@ -56,10 +56,16 @@ Agent-authored values are flattened to a single line, exactly as in
 
 ## Supported targets
 
-`claude`, `codex`, `opencode`.
+`claude`, `codex`, `opencode`, `pi`.
 
 An unsupported target is **refused**, not rendered. Producing a handoff document
 nobody will read loses the state instead of reporting the mistake.
+
+The document itself is identical for every target — the target name is recorded
+in the event and in `session.last_agent`, it does not change the rendering. So a
+target is supported once an agent can actually receive the document, whether it
+reads it through MCP (`session.get`) or through the CLI (`agent-session handoff`),
+which is how `pi` qualifies without having an MCP client.
 
 Adding a target is additive. Removing one is not.
 

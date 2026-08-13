@@ -8,6 +8,10 @@
 //	OpenCode      .opencode/command/*.md  (project) | ~/.config/opencode/commands (user)
 //	Cursor        .cursor/commands/*.md
 //	Cline         .clinerules/*.md        (project)
+//	pi            .pi/prompts/*.md        (project) | ~/.pi/agent/prompts (user)
+//
+// pi installs its own command set through InstallSet rather than All(): every
+// universal prompt tells the agent to call MCP tools, and pi has no MCP client.
 package commands
 
 import (
@@ -103,11 +107,18 @@ func isManaged(data string) bool {
 // needed) and returns the paths written. It never overwrites a non-empty file
 // that isn't ours, and it is idempotent.
 func Install(dir string) ([]string, error) {
+	return InstallSet(dir, All())
+}
+
+// InstallSet is Install for an agent that needs its own command set. pi has no
+// MCP, so the universal prompts — which all instruct the agent to call MCP
+// tools — would tell it to do something it cannot do.
+func InstallSet(dir string, cmds []Command) ([]string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create commands dir: %w", err)
 	}
 	var written []string
-	for _, c := range All() {
+	for _, c := range cmds {
 		path := filepath.Join(dir, c.FileName())
 		content := c.Render()
 		if existing, err := os.ReadFile(path); err == nil {
@@ -131,8 +142,13 @@ func Install(dir string) ([]string, error) {
 // Uninstall removes the agent-session command files from the given directory.
 // Files not owned by us are left untouched. Returns the count removed.
 func Uninstall(dir string) (int, error) {
+	return UninstallSet(dir, All())
+}
+
+// UninstallSet is Uninstall for a custom command set (see InstallSet).
+func UninstallSet(dir string, cmds []Command) (int, error) {
 	removed := 0
-	for _, c := range All() {
+	for _, c := range cmds {
 		path := filepath.Join(dir, c.FileName())
 		data, err := os.ReadFile(path)
 		if err != nil {

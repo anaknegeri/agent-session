@@ -12,6 +12,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/codex"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cursor"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/pi"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/plugin"
 )
 
@@ -151,8 +152,23 @@ func configureAgent(name string, install bool, scope string) error {
 			return a.Install(ctx())
 		}
 		return a.Uninstall(ctx())
+	case "pi":
+		if scope == "user" {
+			if install {
+				return installPiGlobal(bin)
+			}
+			return uninstallPiGlobal()
+		}
+		a := pi.NewAdapter(cwd())
+		if install {
+			if err := a.Configure(ctx(), bin); err != nil {
+				return err
+			}
+			return a.Install(ctx())
+		}
+		return a.Uninstall(ctx())
 	}
-	return fmt.Errorf("unknown agent %q (claude, codex, opencode, cursor, cline)", name)
+	return fmt.Errorf("unknown agent %q (claude, codex, opencode, cursor, cline, pi)", name)
 }
 
 func selfPath() string {

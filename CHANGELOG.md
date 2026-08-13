@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **pi support (`init --only pi`, `plugin install pi`).** pi ships no MCP client on
+  purpose — "No MCP. Build CLI tools with READMEs (see Skills), or build an extension
+  that adds MCP support" — so the integration is an extension plus the CLI rather than
+  a server registration. `.pi/extensions/agent-session.ts` (project) or
+  `~/.pi/agent/extensions/` (user) is the pi equivalent of the SessionStart / Stop /
+  PreCompact hooks: it runs `resume --agent pi` on `session_start`, hands the rendered
+  context to the model on `before_agent_start` as a persistent `agent-session` entry,
+  and checkpoints on `session_before_compact` and `session_shutdown`. Recording is
+  described to the model by a skill (`agent-session/SKILL.md`) instead of a tool list,
+  and pi gets its own wording of the three slash commands, since the universal ones
+  name MCP tools it cannot reach. The binary path is baked in absolute
+  (`AGENT_SESSION_BIN` overrides it) because pi is often launched from a GUI whose
+  PATH has neither nvm nor Homebrew on it. `handoff pi` works like any other target.
+  pi's project-local resources load only after the user trusts the project, the same
+  shape of gate as Codex's hook approval; agent-session never writes that trust
+  record. `TestPiSmoke` covers it against the real CLI and is the one smoke test that
+  needs no credentials: pi fires the startup hooks before it contacts a provider, so
+  an intentionally invalid key exercises every hook while the model never runs.
+- **CLI write verbs: `task add|list|update`, `decision add|list`,
+  `blocker add|list|resolve`, `event add <type>`.** The MCP tools were the only way to
+  record anything, which left an agent without an MCP client — pi, a shell script, a
+  CI job — able to read a session but never to move it. `event add` names the accepted
+  event types in its error instead of only rejecting the bad one, and writes through
+  the same path MCP uses, so oversized payloads are offloaded to an artifact here too.
+  `AGENT_SESSION_AGENT` attributes the write to the calling agent rather than to the
+  generic `cli`.
 - **Six v1 contracts, specified in `docs/spec/` and held by `test/contract/`.** A
   session is written by one agent and read by another, often by a different build of
   this binary, and until now the shapes crossing that boundary existed only as

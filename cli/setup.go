@@ -14,6 +14,7 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/commands"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/cursor"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/opencode"
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/pi"
 )
 
 // commandsDirFor returns the user-scope slash-command directory for an agent,
@@ -30,6 +31,9 @@ func commandsDirFor(agentName string) (string, error) {
 		return filepath.Join(home, ".config", "opencode", "commands"), nil
 	case "cursor":
 		return filepath.Join(home, ".cursor", "commands"), nil
+	// pi is deliberately absent: its prompts are installed by the pi package,
+	// because the universal set instructs the agent to call MCP tools and pi has
+	// no MCP client. See internal/infrastructure/agent/pi.
 	default:
 		return "", nil
 	}
@@ -168,6 +172,46 @@ func installCursor(dir, bin string) {
 		return
 	}
 	green("✓ cursor: .cursor/mcp.json + .cursor/rules/agent-session.mdc\n")
+}
+
+// installPi wires pi at project scope: .pi/extensions + skill + prompts. Those
+// stay inert until the user trusts the project in pi, which is why the caller
+// prints the manual step.
+func installPi(dir, bin string) {
+	a := pi.NewAdapter(dir)
+	if err := a.Configure(ctx(), bin); err != nil {
+		red("✗ pi: %v\n", err)
+		return
+	}
+	if err := a.Install(ctx()); err != nil {
+		red("✗ pi: %v\n", err)
+		return
+	}
+	green("✓ pi: .pi/extensions/agent-session.ts + skill + prompts (no MCP — pi ships none)\n")
+	yellow("  ! project-local pi resources load only after you trust this project in pi:\n")
+	yellow("      run `pi` here and approve the project once\n")
+	yellow("    agent-session cannot approve on your behalf: that gate is what stops an installer\n")
+	yellow("    from wiring shell commands into your agent. Use user scope (no --project) to skip it.\n")
+}
+
+// installPiGlobal wires pi at user scope (~/.pi/agent), which needs no project
+// trust: the extension guards itself by looking for .agent/ before doing
+// anything, so it is silent in projects that do not use agent-session.
+func installPiGlobal(bin string) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	return pi.EnsureResources(pi.UserRoot(home), bin)
+}
+
+// uninstallPiGlobal reverses installPiGlobal.
+func uninstallPiGlobal() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("home dir: %w", err)
+	}
+	return pi.RemoveResources(pi.UserRoot(home))
 }
 
 func installCline(dir, bin string) {
