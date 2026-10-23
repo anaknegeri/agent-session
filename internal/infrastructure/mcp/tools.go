@@ -532,10 +532,10 @@ func (s *Server) registerTools() {
 		},
 		{
 			name: "memory.put",
-			desc: "Store a piece of long-term knowledge (kind: project_knowledge, architecture, solution, preference, skill).",
+			desc: "Save one piece of long-term knowledge that outlives the session — a fact about the project, an architecture choice, a fix that worked, a user preference — and index it for memory.search; context.get surfaces related entries later. Every call adds a new entry with a new ID (nothing is merged or overwritten), so memory.search first to avoid a duplicate. Works without an active session. Returns the entry JSON with its id; errors on an unknown kind. To copy this session's decisions, resolved blockers and completed tasks in bulk use memory.promote.",
 			options: []mcp.ToolOption{
-				mcp.WithString("kind", mcp.Description("project_knowledge|architecture|solution|preference|skill"), mcp.Required()),
-				mcp.WithString("content", mcp.Description("The knowledge to remember"), mcp.Required()),
+				mcp.WithString("kind", mcp.Description("project_knowledge (facts about the codebase), architecture (design choices), solution (a fix that worked), preference (how the user wants things done), or skill (a reusable procedure)"), mcp.Required()),
+				mcp.WithString("content", mcp.Description("Self-contained plain text a future agent can act on without this session, e.g. \"The billing API rejects requests without an Idempotency-Key header\""), mcp.Required()),
 			},
 			run: func(ctx context.Context, args map[string]any) (any, error) {
 				sessionID, _ := s.currentSession(ctx)

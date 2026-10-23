@@ -5,6 +5,16 @@ All notable changes to Agent Session are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- **`memory.put` says what a write does.** 0.1.9 took away its `idempotentHint`,
+  which had been standing in for its behaviour, and left a one-line description
+  behind. It now states that every call adds a new entry (nothing is merged or
+  overwritten), that it works without an active session, what it returns, and
+  when `memory.promote` is the better fit. `kind` and `content` describe what
+  each value is for.
+
 ## [0.1.9] — 2026-10-24
 
 ### Added
