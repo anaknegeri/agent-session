@@ -5,7 +5,7 @@ All notable changes to Agent Session are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.1.9] — 2026-08-13
+## [0.1.9] — 2026-10-24
 
 ### Added
 - **Export/import is now a versioned v1 contract.** `docs/spec/export-v1.md`
