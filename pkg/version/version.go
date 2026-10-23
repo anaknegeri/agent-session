@@ -18,7 +18,7 @@ import (
 
 // DefaultVersion is the fallback when not injected. It must match the latest
 // tagged release so ad-hoc builds report a sane version.
-const DefaultVersion = "0.1.9"
+const DefaultVersion = "0.1.10"
 
 var (
 	Version = DefaultVersion
