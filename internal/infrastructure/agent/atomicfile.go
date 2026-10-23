@@ -44,7 +44,14 @@ func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("close %s: %w", tmp, err)
 	}
 	// CreateTemp makes the file 0600; agents have to be able to read what we wrote.
-	if err := os.Chmod(tmp, perm); err != nil {
+	// An existing file keeps its own mode: ~/.codex/config.toml and ~/.claude.json
+	// are 0600 because they can hold API keys, and os.WriteFile — which this
+	// replaced — never widened them. perm only applies to a file we create.
+	mode := perm
+	if fi, err := os.Stat(path); err == nil {
+		mode = fi.Mode().Perm()
+	}
+	if err := os.Chmod(tmp, mode); err != nil {
 		return fmt.Errorf("chmod %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
