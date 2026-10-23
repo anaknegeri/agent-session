@@ -53,14 +53,22 @@ func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
 
+// Checkpoint is the row a checkpoint is stored as. Every key is always present in
+// its JSON. checkpoint-v1.md lists all nine, and four of them carried `omitempty`,
+// so `session.checkpoint` and `session://checkpoint/latest` dropped `task_id`,
+// `label`, `next_action` and `agent` whenever they were empty — which is the
+// common case. A reader in another language then had to treat absent, empty and
+// null as one value for the fields it is most likely to branch on: `next_action`
+// decides what the resuming agent does. Same rule as Snapshot — empty means empty
+// string, never absent.
 type Checkpoint struct {
 	ID         string    `json:"id" db:"id"`
 	SessionID  string    `json:"session_id" db:"session_id"`
-	TaskID     string    `json:"task_id,omitempty" db:"task_id"`
+	TaskID     string    `json:"task_id" db:"task_id"`
 	Kind       string    `json:"kind" db:"kind"`
-	Label      string    `json:"label,omitempty" db:"label"`
+	Label      string    `json:"label" db:"label"`
 	Snapshot   string    `json:"snapshot" db:"snapshot"`
-	NextAction string    `json:"next_action,omitempty" db:"next_action"`
-	Agent      string    `json:"agent,omitempty" db:"agent"`
+	NextAction string    `json:"next_action" db:"next_action"`
+	Agent      string    `json:"agent" db:"agent"`
 	CreatedAt  Timestamp `json:"created_at" db:"created_at"`
 }

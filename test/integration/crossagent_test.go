@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -37,6 +38,15 @@ func TestCrossAgentHandoffSmoke(t *testing.T) {
 	dir := t.TempDir()
 	gitInit(t, dir)
 	initCLI(t, dir, "--project", "--only", "claude")
+
+	// `--dangerously-skip-permissions` bypasses tool-call approval, not the
+	// separate one-time "trust this project's .mcp.json servers" gate. That gate
+	// is normally cleared by an interactive prompt; `-p` mode cannot render one
+	// and fails with a misleading "Prompt is too long" instead of a clear error.
+	// A real user clears it once per directory and Claude Code remembers the
+	// decision in this file, so the test writes the same record instead of
+	// depending on a human being present for a fresh temp directory.
+	trustProjectMCP(t, dir, "agent-session")
 
 	// unique per run, so finding it in Codex's output cannot be a coincidence or a
 	// leftover from an earlier session
@@ -235,4 +245,21 @@ func runCLI(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("agent-session %v: %v: %s", args, err, out)
 	}
 	return string(out)
+}
+
+// trustProjectMCP writes the same record Claude Code makes when a human clears
+// its one-time "trust this project's .mcp.json servers" prompt. That gate is
+// separate from --dangerously-skip-permissions (which only covers tool-call
+// approval) and `-p` mode cannot render the interactive prompt to clear it
+// itself, so a smoke test against a fresh temp directory has to pre-seed it.
+func trustProjectMCP(t *testing.T, dir string, servers ...string) {
+	t.Helper()
+	path := filepath.Join(dir, ".claude", "settings.local.json")
+	data, err := json.MarshalIndent(map[string][]string{"enabledMcpjsonServers": servers}, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal settings.local.json: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }

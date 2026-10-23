@@ -2,12 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/pkg/safetext"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -27,11 +27,14 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
-			fmt.Printf("Project       %s\n", snapshot.Workspace.Repository)
-			fmt.Printf("Session       %s\n", singleLine(snapshot.Session.Title))
+			// Every value below except Status is agent-authored or repo-derived free
+			// text. Flattened uniformly: a newline in a blocker description or an
+			// agent name shatters the fixed-width layout this command exists to give.
+			fmt.Printf("Project       %s\n", safetext.SingleLine(snapshot.Workspace.Repository))
+			fmt.Printf("Session       %s\n", safetext.SingleLine(snapshot.Session.Title))
 			fmt.Printf("Status        %s\n", title(snapshot.Session.Status))
-			fmt.Printf("Last Agent    %s\n", snapshot.LastAgent)
-			fmt.Printf("Branch        %s\n", snapshot.Workspace.Branch)
+			fmt.Printf("Last Agent    %s\n", safetext.SingleLine(snapshot.LastAgent))
+			fmt.Printf("Branch        %s\n", safetext.SingleLine(snapshot.Workspace.Branch))
 			fmt.Printf("\n")
 
 			total := len(snapshot.Progress.Completed) + len(snapshot.Progress.Pending)
@@ -43,23 +46,23 @@ func newStatusCmd() *cobra.Command {
 			if len(snapshot.Progress.Completed) > 0 {
 				fmt.Printf("\nCompleted\n")
 				for _, item := range snapshot.Progress.Completed {
-					fmt.Printf("  ✓ %s\n", item)
+					fmt.Printf("  ✓ %s\n", safetext.SingleLine(item))
 				}
 			}
 			if len(snapshot.Progress.Pending) > 0 {
 				fmt.Printf("\nIn progress\n")
 				for _, item := range snapshot.Progress.Pending {
-					fmt.Printf("  • %s\n", item)
+					fmt.Printf("  • %s\n", safetext.SingleLine(item))
 				}
 			}
 			if len(snapshot.Blockers) > 0 {
 				fmt.Printf("\nBlocked\n")
 				for _, b := range snapshot.Blockers {
-					fmt.Printf("  ✗ %s\n", b.Description)
+					fmt.Printf("  ✗ %s\n", safetext.SingleLine(b.Description))
 				}
 			}
 			if snapshot.NextAction != "" {
-				fmt.Printf("\nNext\n  %s\n", snapshot.NextAction)
+				fmt.Printf("\nNext\n  %s\n", safetext.SingleLine(snapshot.NextAction))
 			}
 			return nil
 		},
@@ -72,12 +75,6 @@ func currentSession(app *bootstrap.App) (*entities.Session, error) {
 		return nil, err
 	}
 	return app.Session.GetActive(ctx(), projectID)
-}
-
-// singleLine collapses embedded newlines so free-text fields can't break the
-// fixed-width key-value layout of `status`.
-func singleLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
 }
 
 func title(s string) string {

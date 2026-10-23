@@ -87,7 +87,14 @@ func newPluginUninstallCmd() *cobra.Command {
 	return cmd
 }
 
+// configureAgent installs or removes agent-session's wiring for one agent.
+// Conflicts are printed and dropped: `plugin install` is re-runnable, and a
+// generated file the user tuned is not a reason to report failure.
 func configureAgent(name string, install bool, scope string) error {
+	return keptUserEdits(configureAgentScope(name, install, scope))
+}
+
+func configureAgentScope(name string, install bool, scope string) error {
 	bin := selfPath()
 	switch name {
 	case "claude":

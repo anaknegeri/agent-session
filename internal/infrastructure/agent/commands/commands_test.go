@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 func TestInstallAndUninstall(t *testing.T) {
@@ -77,6 +80,86 @@ func TestRender(t *testing.T) {
 		if !strings.Contains(out, "Agent Session") {
 			t.Fatalf("%s missing Agent Session mention", c.FileName())
 		}
+	}
+}
+
+// The ownership predicate used to live here and match the full literal
+// `<!-- agent-session:managed -->`. The moment the marker grew a version and a
+// digest, every command file the new build wrote failed its own check: init
+// stopped updating them and uninstall left them behind. Ownership now has exactly
+// one definition, in the agent package.
+func TestInstallUpdatesFilesWrittenByAnOlderRelease(t *testing.T) {
+	dir := t.TempDir()
+	first := All()[0]
+	path := filepath.Join(dir, first.FileName())
+	// What 0.1.8 wrote: our bare marker, an out-of-date body, no digest.
+	stale := "---\ndescription: " + first.Description + "\n---\n<!-- " + agent.ManagedMarker + " -->\n\nold prompt\n"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Install(dir); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "old prompt") {
+		t.Fatalf("a command file of ours was never updated:\n%s", data)
+	}
+
+	// Install also wrote the rest of the set, so uninstall must reclaim all of it.
+	removed, err := Uninstall(dir)
+	if err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+	if removed != len(All()) {
+		t.Fatalf("uninstall removed %d of its own files, want %d", removed, len(All()))
+	}
+}
+
+func TestInstallKeepsAndReportsAnEditedCommand(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := Install(dir); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	path := filepath.Join(dir, All()[0].FileName())
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := string(original) + "\nAlso always run my linter.\n"
+	if err := os.WriteFile(path, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = Install(dir)
+	if !errors.Is(err, agent.ErrUserModified) {
+		t.Fatalf("an edited command was not reported: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != edited {
+		t.Errorf("the user's edit was overwritten:\n%s", got)
+	}
+	// The rest of the set still installs: one tuned command must not block them.
+	for _, c := range All()[1:] {
+		if _, statErr := os.Stat(filepath.Join(dir, c.FileName())); statErr != nil {
+			t.Errorf("%s missing after a conflict on another file: %v", c.FileName(), statErr)
+		}
+	}
+
+	removed, err := Uninstall(dir)
+	if !errors.Is(err, agent.ErrUserModified) {
+		t.Fatalf("uninstall did not report the file it kept: %v", err)
+	}
+	if removed != len(All())-1 {
+		t.Errorf("uninstall removed %d files, want %d", removed, len(All())-1)
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Errorf("uninstall deleted the command the user had edited: %v", statErr)
 	}
 }
 

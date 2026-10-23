@@ -2,7 +2,6 @@ package codex
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -50,10 +49,6 @@ var hookCommands = map[string]string{
 	"Stop":         `[ -d .agent ] && agent-session checkpoint --label auto || true`,
 }
 
-// hookMarker identifies the commands this adapter owns, so install can be
-// idempotent and uninstall can remove ours without touching anyone else's.
-const hookMarker = "agent-session"
-
 // Install writes the session lifecycle hooks into $CODEX_HOME/hooks.json.
 //
 // Codex does support hooks — the same shape Claude Code uses — but agent-session
@@ -88,7 +83,8 @@ func (a *Adapter) Install(ctx context.Context) error {
 	for event, command := range hookCommands {
 		entries := removeOurEntries(hooks[event])
 		entries = append(entries, map[string]any{
-			"hooks": []any{map[string]any{"type": "command", "command": command}},
+			agent.ManagedByKey: agent.ManagedByValue,
+			"hooks":            []any{map[string]any{"type": "command", "command": command}},
 		})
 		hooks[event] = entries
 	}
@@ -186,37 +182,19 @@ func (a *Adapter) uninstallHooks() error {
 }
 
 // readHooks loads hooks.json, treating a missing or empty file as an empty
-// configuration so a first install does not need one to exist.
+// configuration so a first install does not need one to exist. An unparseable
+// file is an error: it is shared with plugin-provided hooks, and starting over
+// from {} would silently delete them.
 func readHooks(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return map[string]any{}, nil
-		}
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	if len(strings.TrimSpace(string(data))) == 0 {
-		return map[string]any{}, nil
-	}
-	var root map[string]any
-	if err := json.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
-	if root == nil {
-		root = map[string]any{}
-	}
-	return root, nil
+	return agent.ReadJSONConfig(path)
 }
 
+// writeHooks goes through the shared writer, which turns off HTML escaping and
+// replaces the file atomically. json.MarshalIndent stored the shell command we
+// installed as `[ -d .agent ] \u0026\u0026 agent-session resume …`, so a user
+// auditing what we put in their agent read valid JSON that looks like corruption.
 func writeHooks(path string, root map[string]any) error {
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode hooks: %w", err)
-	}
-	if err := os.WriteFile(path, append(out, '\n'), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return agent.WriteJSONConfig(path, root)
 }
 
 func childObject(parent map[string]any, key string) map[string]any {
@@ -243,10 +221,19 @@ func removeOurEntries(value any) []any {
 	return kept
 }
 
+// ownsEntry reports whether a hook group is one we installed.
+//
+// Ownership was "the command contains agent-session", which also claims a user's
+// own my-agent-session-wrapper.sh hook and deletes it on uninstall. New entries
+// carry an explicit key; the legacy shape is still recognised so an install from
+// an earlier release can be cleaned up.
 func ownsEntry(entry any) bool {
 	group, ok := entry.(map[string]any)
 	if !ok {
 		return false
+	}
+	if agent.OwnsJSONEntry(group) {
+		return true
 	}
 	inner, ok := group["hooks"].([]any)
 	if !ok {
@@ -257,7 +244,7 @@ func ownsEntry(entry any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, ok := hook["command"].(string); ok && strings.Contains(cmd, hookMarker) {
+		if cmd, ok := hook["command"].(string); ok && agent.OwnsLegacyHookCommand(cmd) {
 			return true
 		}
 	}
@@ -283,7 +270,10 @@ func (a *Adapter) uninstallMCP() error {
 	if out == string(data) {
 		return nil
 	}
-	return os.WriteFile(cfg, []byte(out), 0o644)
+	// config.toml holds the user's own MCP servers and their approved hook
+	// hashes; truncate-then-write can leave it half-rewritten and Codex then
+	// starts with none of them.
+	return agent.WriteFileAtomic(cfg, []byte(out), 0o644)
 }
 
 // ConfigDir returns the directory Codex reads its configuration from: $CODEX_HOME

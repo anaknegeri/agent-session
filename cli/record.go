@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/pkg/safetext"
 )
 
 // The commands in this file mirror the MCP write tools (task.*, decision.*,
@@ -19,10 +20,13 @@ import (
 // their own environment so their writes are attributed to them rather than to
 // the generic CLI.
 func recordingAgent(flag string) string {
+	// Normalized where it enters, like the MCP server does: the name lands on
+	// every row this command writes and is rendered as the session layer's own
+	// assertion, so a multi-line value could forge a section downstream.
 	if flag != "" {
-		return flag
+		return safetext.Identifier(flag)
 	}
-	if env := os.Getenv("AGENT_SESSION_AGENT"); env != "" {
+	if env := safetext.Identifier(os.Getenv("AGENT_SESSION_AGENT")); env != "" {
 		return env
 	}
 	return "cli"
@@ -82,7 +86,7 @@ func newTaskListCmd() *cobra.Command {
 				return err
 			}
 			for _, t := range tasks {
-				fmt.Printf("%s  %-12s %s\n", t.ID, t.Status, singleLine(t.Title))
+				fmt.Printf("%s  %-12s %s\n", t.ID, t.Status, safetext.SingleLine(t.Title))
 			}
 			return nil
 		},
@@ -165,9 +169,9 @@ func newDecisionListCmd() *cobra.Command {
 				return err
 			}
 			for _, d := range rows {
-				fmt.Printf("%s  %s\n", d.ID, singleLine(d.Decision))
+				fmt.Printf("%s  %s\n", d.ID, safetext.SingleLine(d.Decision))
 				if d.Reason != "" {
-					fmt.Printf("            why: %s\n", singleLine(d.Reason))
+					fmt.Printf("            why: %s\n", safetext.SingleLine(d.Reason))
 				}
 			}
 			return nil
@@ -225,7 +229,7 @@ func newBlockerListCmd() *cobra.Command {
 				return err
 			}
 			for _, b := range rows {
-				fmt.Printf("%s  %-9s %s\n", b.ID, b.Status, singleLine(b.Description))
+				fmt.Printf("%s  %-9s %s\n", b.ID, b.Status, safetext.SingleLine(b.Description))
 			}
 			return nil
 		},

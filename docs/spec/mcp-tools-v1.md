@@ -1,6 +1,6 @@
 # MCP Tool Contract v1
 
-The MCP surface agents talk to: **25 tools** and **7 resources**.
+The MCP surface agents talk to: **26 tools** and **7 resources**.
 
 This is the contract with the widest audience — every agent that connects lists it
 and decides what it is allowed to call. Removing or renaming a tool breaks callers.
@@ -17,8 +17,16 @@ per argument.
 | Annotation | Meaning here |
 | --- | --- |
 | `readOnlyHint` | changes no state at all, not even a recorded side effect |
-| `idempotentHint` | writes, and calling it twice with the same arguments is safe |
+| `idempotentHint` | writes, and a repeat with the same arguments leaves the same state (it may log another event) |
 | `destructiveHint` | removes data |
+| — (none) | writes a new row with a fresh ID on every call, so a repeat leaves a duplicate |
+
+`idempotentHint` follows the MCP definition: a repeated call with the same
+arguments has no additional effect. A tool that creates a task, decision, blocker,
+event, checkpoint or knowledge entry does not meet it, so it carries no hint. These
+eight tools were annotated `idempotentHint` until 0.1.9; dropping a hint that was
+never true tells a client to stop retrying them blindly, and no tool, argument or
+result changed, so the contract stays v1.
 
 Why this is behavioural rather than documentary: **Codex under `approval: never`
 — which is what `codex exec` uses — executes only tools annotated
@@ -35,9 +43,9 @@ alongside `context.get`.
 | --- | --- | --- | --- |
 | `session.get` | readOnly | `session_id?` | current session state |
 | `session.diff` | readOnly | `before_id?`, `after_id?` | what changed between two checkpoints (defaults to the two latest) |
-| `session.checkpoint` | idempotent | `label?`, `next_action?` | create a checkpoint snapshot |
+| `session.checkpoint` | — | `label?`, `next_action?` | create a checkpoint snapshot |
 | `session.resume` | idempotent | `agent?` | resume the latest session and mark it active |
-| `session.record` | idempotent | `event_type?`, `event_payload?`, `decision?`, `decision_reason?`, `next_action?`, `checkpoint?` | record work in one call — event, decision, next action and optional checkpoint |
+| `session.record` | — | `event_type?`, `event_payload?`, `decision?`, `decision_reason?`, `next_action?`, `checkpoint?` | record work in one call — event, decision, next action and optional checkpoint |
 
 `session.record` is the preferred write path. It exists because four separate calls
 per recorded step is the cost that makes agents stop recording.
@@ -48,7 +56,7 @@ per recorded step is the cost that makes agents stop recording.
 | --- | --- | --- | --- |
 | `context.get` | idempotent | `depth?` | render context, sync file changes, maybe auto-checkpoint |
 | `context.read` | readOnly | `depth?` | render the same context, record nothing |
-| `context.update` | idempotent | `field`, `value` | set `task_title` \| `task_status` \| `next_action` \| `session_title` |
+| `context.update` | — | `field`, `value` | set `task_title` \| `task_status` \| `next_action` \| `session_title` |
 | `context.summarize` | readOnly | — | ask the agent to summarize and store it via `memory.put` |
 
 `context.get` is **not** read-only, and the distinction is deliberate: it records
@@ -65,7 +73,7 @@ external LLM is involved.
 
 | Tool | Annotation | Arguments | Purpose |
 | --- | --- | --- | --- |
-| `task.create` | idempotent | `title` | create a task and make it current |
+| `task.create` | — | `title` | create a task and make it current |
 | `task.get` | readOnly | `task_id?` | get a task (defaults to the current one) |
 | `task.update` | idempotent | `task_id`, `title?`, `status?` | update title and/or status |
 
@@ -75,9 +83,9 @@ external LLM is involved.
 
 | Tool | Annotation | Arguments | Purpose |
 | --- | --- | --- | --- |
-| `decision.create` | idempotent | `decision`, `reason?` | record a decision |
+| `decision.create` | — | `decision`, `reason?` | record a decision |
 | `decision.list` | readOnly | `session_id?` | list decisions |
-| `blocker.create` | idempotent | `description` | record a blocker |
+| `blocker.create` | — | `description` | record a blocker |
 | `blocker.list` | readOnly | `open_only?` | list blockers |
 | `blocker.resolve` | idempotent | `blocker_id` | resolve a blocker |
 
@@ -85,16 +93,21 @@ external LLM is involved.
 
 | Tool | Annotation | Arguments | Purpose |
 | --- | --- | --- | --- |
-| `event.append` | idempotent | `type`, `payload?` | append a canonical event |
+| `event.append` | — | `type`, `payload?` | append a canonical event |
+| `artifact.get` | readOnly | `artifact_id` | read a payload that was offloaded to an artifact |
 
 `type` must be one of the canonical types in [event-v1.md](event-v1.md); anything
-else is rejected. Payloads over 8192 bytes are offloaded to an artifact.
+else is rejected. Payloads over 8192 bytes are offloaded to an artifact, and
+`artifact.get` is how the `{"artifact_id": "art_…"}` an event carries in their place
+is read back — scoped to the session that wrote it, so an id from another session
+resolves to nothing. Without it an offloaded payload was unreachable, which from a
+reader's point of view is data thrown away.
 
 ### memory
 
 | Tool | Annotation | Arguments | Purpose |
 | --- | --- | --- | --- |
-| `memory.put` | idempotent | `kind`, `content` | store long-term knowledge |
+| `memory.put` | — | `kind`, `content` | store long-term knowledge |
 | `memory.get` | readOnly | `memory_id` | get an entry |
 | `memory.search` | readOnly | `query`, `limit?` | full-text search |
 | `memory.delete` | destructive | `memory_id` | delete an entry |
@@ -117,9 +130,9 @@ return less than the caller asked for.
 
 ## Every tool has a description
 
-Tool names alone are not a usable surface: an agent choosing between 25 of them
+Tool names alone are not a usable surface: an agent choosing between 26 of them
 needs to know what they do, which is what the descriptions are for. A tool shipping
-without one is a contract violation, and the contract test checks all 25 —
+without one is a contract violation, and the contract test checks all 26 —
 because they were all silently dropped once already.
 
 ## Resources

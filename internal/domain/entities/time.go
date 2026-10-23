@@ -58,14 +58,25 @@ func (t Timestamp) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t.UTC().Format(time.RFC3339))
 }
 
+// UnmarshalJSON reads the JSON encoding, and reads `null` as the zero time.
+//
+// `null` is what a hand-authored or third-party document carries for "no time
+// recorded", and every timestamp in an import document is decoded through here:
+// rejecting it failed the whole read with `parse time ""`, which names neither the
+// field nor the file it came from. A zero time is what an absent key already
+// produces, so null and absent now mean the same thing.
 func (t *Timestamp) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" {
+		t.Time = time.Time{}
+		return nil
+	}
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
 		return err
 	}
 	parsed, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return fmt.Errorf("parse time %q: %w", s, err)
+		return fmt.Errorf("parse timestamp %q: expected RFC 3339 (2026-08-13T10:00:00Z) or null: %w", s, err)
 	}
 	t.Time = parsed
 	return nil

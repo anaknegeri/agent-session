@@ -9,15 +9,15 @@ gated smoke tests need the real CLIs plus credentials and cannot run in ordinary
 CI. Do not upgrade a cell to ✅ without a test that fails when the capability
 breaks.
 
-| Agent | MCP tools | Context | Checkpoint | Handoff | Hooks | Slash cmds |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 |
-| Codex | ✅ | ✅ read-only path | 🟡 | ✅ | 🟡 registered, needs one-time trust | — |
-| OpenCode | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via instructions only | 🟡 |
-| Cursor | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via rules only | 🟡 |
-| Cline | 🟡 | 🟡 | 🟡 | ⚠ | ⚠ via rules only | — |
-| pi | ❌ none shipped | ✅ via CLI | ✅ | 🟡 | ✅ extension lifecycle | 🟡 |
-| omp (oh-my-pi) | 🟡 | ✅ via extension | ✅ | 🟡 | ✅ extension lifecycle | 🟡 |
+| Agent | MCP tools | Context | Checkpoint | Handoff | Hooks | Slash cmds | Safe install |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ | 🟡 | ✅ |
+| Codex | ✅ | ✅ read-only path | 🟡 | ✅ | 🟡 registered, needs one-time trust | — | ✅ |
+| OpenCode | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via instructions only | 🟡 | ✅ |
+| Cursor | 🟡 | 🟡 | 🟡 | 🟡 | ⚠ via rules only | 🟡 | ✅ |
+| Cline | 🟡 | 🟡 | 🟡 | ⚠ | ⚠ via rules only | — | ✅ |
+| pi | ❌ none shipped | ✅ via CLI | ✅ | 🟡 | ✅ extension lifecycle | 🟡 | ✅ |
+| omp (oh-my-pi) | 🟡 | ✅ via extension | ✅ | 🟡 | ✅ extension lifecycle | 🟡 | ✅ |
 
 ## Legend
 
@@ -29,6 +29,12 @@ breaks.
 - **Handoff** — `handoff` context is produced and consumed by the next agent.
 - **Hooks** — SessionStart/Stop/PreCompact fire automatically.
 - **Slash cmds** — `/agent-session*` commands are available.
+- **Safe install** — re-running `init`/`plugin install` never overwrites a
+  user-modified generated file, uninstall never removes one, and a plain
+  unmarked file the user wrote is never touched either way. Held per adapter by
+  its own `_test.go` (see the table below); the shared mechanism
+  (`agent.WriteManaged`/`RemoveManaged`, marker + version + content hash) is
+  held once by `internal/infrastructure/agent/managed_test.go`.
 
 ## Verified by test
 
@@ -42,6 +48,32 @@ breaks.
 | `TestReadOnlyToolsDoNotWrite` | any MCP client | every tool advertising `readOnlyHint` leaves the session fingerprint (session, last agent, current task, event/checkpoint/task/decision/memory counts) untouched | no |
 | `TestPiSmoke` | pi | `init --project --only pi` writes `.pi/extensions/agent-session.ts`, `.pi/skills/agent-session/SKILL.md` and `.pi/prompts/*.md`; a real `pi` run then sets `last_agent` to `pi` (session_start), injects the rendered context into the pi session as a `customType: "agent-session"` entry (before_agent_start), and leaves a checkpoint labelled `auto` (session_shutdown) | yes |
 | `TestOmpSmoke` | omp | `init --project --only omp` writes `.omp/mcp.json` (stdio, absolute binary, `AGENT_SESSION_AGENT=omp`), `.omp/extensions/agent-session.ts`, `.omp/skills/agent-session/SKILL.md` and `.omp/commands/*.md`; a real `omp` run then sets `last_agent` to `omp` (session_start), injects the rendered context as a `customType: "agent-session"` entry (before_agent_start), and leaves a checkpoint labelled `auto` (session_shutdown) | yes |
+
+## Safe install, per adapter
+
+Each row names the tests that hold the four states the mechanism has to get
+right: a hand-tuned generated file (never overwritten, conflict reported), a
+plain unrelated file (never touched), a re-install (idempotent), and an
+uninstall (removes only what is still ours). "File(s) covered" is what that
+adapter actually writes through the managed path — a strict-JSON/TOML config
+(`.mcp.json`, `hooks.json`, `config.toml`) is a key-scoped merge instead and is
+covered by its own `ReadJSONConfig`/`WriteJSONConfig` tests, not this mechanism.
+
+| Agent | File(s) covered | Tests |
+|---|---|---|
+| Claude Code | `.claude/CLAUDE.md` rule block, hook entries in `.claude/settings.json` (keyed, not whole-file) | `TestProjectWiringPreservesUserFiles`, `TestProjectUninstallRemovesOnlyOurs`, `TestRemoveHooksKeepsAUserHookThatMerelyMentionsAgentSession`, `TestEnsureGlobalRule`, `TestRemoveGlobalRule` |
+| Codex | hook entries in `hooks.json` (keyed) | `TestInstallPreservesForeignHooks`, `TestInstallIsIdempotent`, `TestUninstallRemovesOnlyOurHooks`, `TestUninstallKeepsAUserHookThatMerelyMentionsAgentSession`, `TestUninstallKeepsAForeignOnlyHooksFileByteIdentical` |
+| OpenCode | `agent.instructions.system` note (appended, not whole-file) | `TestMergeGlobalInstructions`, `TestRemoveGlobalInstructions`, `TestConfigureAppendsInstructions` |
+| Cursor | `.cursor/rules/agent-session.mdc` | `TestConfigureUpdatesItsOwnRule`, `TestConfigureLeavesAUserWrittenRuleAlone`, `TestUninstallRemovesTheRule` |
+| Cline | `.clinerules` (file or `.clinerules/agent-session.md` in the directory form) | `TestConfigureWritesIntoClineRulesDirectory`, `TestConfigureKeepsHandWrittenClineRules`, `TestConfigureKeepsAndReportsATunedClineRule` |
+| pi | `extensions/agent-session.ts`, `skills/agent-session/SKILL.md`, `prompts/*.md` | `TestEnsureResourcesIsIdempotent`, `TestEnsureResourcesLeavesForeignFiles`, `TestRemoveResources` |
+| omp | `extensions/agent-session.ts`, `skills/agent-session/SKILL.md`, `commands/*.md` | `TestEnsureResourcesKeepsAndReportsATunedExtension`, `TestEnsureResourcesIsIdempotent`, `TestEnsureResourcesLeavesForeignFiles`, `TestRemoveResourcesSurvivesUnparseableMCP` |
+
+The upgrade path — a plain marker with no version/hash, the shape every file
+installed by 0.1.7/0.1.8 already has on disk — is held once, at the mechanism
+level, by `TestWriteManagedAdoptsTheHashlessMarkerFromOlderReleases`
+(`internal/infrastructure/agent/managed_test.go`): those files are adopted and
+updated on the next `init` rather than frozen out as user-modified.
 
 ### Attribution caveat for the Claude smoke test
 
@@ -180,12 +212,18 @@ looking for `.agent/` before doing anything.
   `OMP_PROFILE`/`PI_PROFILE` (unit-tested), so an exported profile is wired where
   omp reads it. A profile passed only as `omp --profile x` cannot be seen at
   install time: wire that project with `--project`, or export the variable once.
-- **omp subagent sessions.** The lifecycle extension is loaded into every `task`
-  subagent runner too (omp preloads the parent's extension paths), so
-  `session_start` is guarded by a module-level flag — one resume per omp process.
-  The mechanism is unit-asserted and the Bun module-cache assumption behind it was
-  checked by hand (one instance per `?mtime`-tagged specifier); no test spawns a
-  real subagent, because that needs a provider.
+- **omp subagent sessions and multiple project roots.** The lifecycle extension
+  is loaded into every `task` subagent runner too (omp preloads the parent's
+  extension paths), and a subagent can start in a different directory — a git
+  worktree (`cwd: worktree ?? cwd`) may be a different agent-session project root
+  entirely. `session_start` is guarded by a **per-root** set
+  (`resumedRoots`, keyed by resolved project root), not a single process-wide
+  flag, so a second root still resumes once instead of never. The mechanism is
+  unit-asserted (`TestEnsureResourcesWritesEverything` in `omp_test.go`) and the
+  Bun module-cache assumption behind it was checked by hand (one module instance
+  per `?mtime`-tagged specifier); no test
+  spawns a real subagent or a second project root, because that needs a
+  provider.
 - **omp `session_stop`.** The per-turn checkpoint is not exercised by
   `TestOmpSmoke`: the smoke run never settles a turn (its provider call fails), so
   only `session_start`, `before_agent_start` and `session_shutdown` are covered

@@ -27,12 +27,14 @@ import (
 // the events already written under the old name.
 var eventTypesV1 = []string{
 	"blocker.created",
+	"blocker.resolved",
 	"checkpoint.created",
 	"command.executed",
 	"decision.created",
 	"file.changed",
 	"handoff.created",
 	"session.completed",
+	"session.resumed",
 	"session.started",
 	"task.created",
 	"task.updated",
@@ -64,24 +66,21 @@ var payloadKeysV1 = map[string][]string{
 	"task.updated":       {"status", "task_id"},
 	"decision.created":   {"decision_id"},
 	"blocker.created":    {"blocker_id"},
+	"blocker.resolved":   {"blocker_id"},
 	"checkpoint.created": {"checkpoint_id"},
 	"handoff.created":    {"checkpoint_id", "from_agent", "handoff_id", "to_agent"},
 	"file.changed":       {"files"},
 }
 
 func TestEventTypesV1(t *testing.T) {
-	got := make([]string, 0, len(eventTypesV1))
-	for _, candidate := range eventTypesV1 {
-		if entities.IsCanonicalEventType(candidate) {
-			got = append(got, candidate)
-		}
+	// Compared against the whole namespace, in both directions: a type added to
+	// the code without being added here would otherwise ship undocumented, which
+	// is how the table became a description of habit rather than a contract.
+	want := append([]string(nil), eventTypesV1...)
+	sort.Strings(want)
+	if got := entities.CanonicalEventTypes(); !reflect.DeepEqual(want, got) {
+		t.Errorf("the canonical event namespace no longer matches v1\n want %v\n got  %v\n see docs/spec/event-v1.md", want, got)
 	}
-	if !reflect.DeepEqual(eventTypesV1, got) {
-		t.Errorf("a v1 event type is no longer canonical\n want %v\n got  %v", eventTypesV1, got)
-	}
-
-	// The other direction: a type added to the code without being added here
-	// would otherwise ship undocumented.
 	for _, extra := range []string{"session.paused", "memory.promoted", "workspace.synced"} {
 		if entities.IsCanonicalEventType(extra) {
 			t.Errorf("%q is canonical but not in the v1 baseline; add it here and to docs/spec/event-v1.md", extra)
@@ -117,8 +116,12 @@ func TestEventPayloadsV1(t *testing.T) {
 	if _, err := app.Decision.Create(ctx, sessionID, "freeze the contract", "readers depend on it", "claude"); err != nil {
 		t.Fatalf("create decision: %v", err)
 	}
-	if _, err := app.Decision.CreateBlocker(ctx, sessionID, "waiting on review", "claude"); err != nil {
+	blocker, err := app.Decision.CreateBlocker(ctx, sessionID, "waiting on review", "claude")
+	if err != nil {
 		t.Fatalf("create blocker: %v", err)
+	}
+	if err := app.Decision.ResolveBlocker(ctx, blocker.ID); err != nil {
+		t.Fatalf("resolve blocker: %v", err)
 	}
 	if _, err := app.Checkpoint.Create(ctx, sessionID, "contract", "", "claude"); err != nil {
 		t.Fatalf("create checkpoint: %v", err)
@@ -198,6 +201,71 @@ func TestFileChangedPayloadV1(t *testing.T) {
 		return
 	}
 	t.Fatal("file.changed event not found")
+}
+
+// TestEmptyPayloadIsJSONV1 holds the one clause the spec states about a payload
+// with nothing in it: it is `{}`, and the key is always present. Every event the
+// session layer writes without a payload — session.started, session.resumed,
+// session.completed — used to be stored as an empty string and marshalled with the
+// key dropped entirely, so a reader in another language either parsed that as JSON
+// or handled a missing field. 22 such rows exist in this repo's own database.
+func TestEmptyPayloadIsJSONV1(t *testing.T) {
+	app := newProject(t)
+	ctx := context.Background()
+	sessionID := activeSession(t, app)
+
+	if err := app.Artifact.AppendEvent(ctx, sessionID, "claude", entities.EventCommandExecuted, ""); err != nil {
+		t.Fatalf("append with an empty payload: %v", err)
+	}
+
+	events, err := app.Event.List(ctx, sessionID, 200)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("no events recorded")
+	}
+	for _, ev := range events {
+		if ev.Payload != entities.EmptyPayload && ev.Payload != "" {
+			// a payload with content is checked by the tests above
+			if !json.Valid([]byte(ev.Payload)) {
+				t.Errorf("%s payload is not JSON: %q", ev.Type, ev.Payload)
+			}
+			continue
+		}
+		if ev.Payload == "" {
+			t.Errorf("%s was stored with an empty payload; the append path normalizes it to %s", ev.Type, entities.EmptyPayload)
+		}
+
+		// what a client actually receives, which is where the key has to exist
+		data, err := json.Marshal(ev)
+		if err != nil {
+			t.Fatalf("marshal event: %v", err)
+		}
+		var row map[string]any
+		if err := json.Unmarshal(data, &row); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		payload, ok := row["payload"]
+		if !ok {
+			t.Errorf("%s marshalled without a payload key: %s", ev.Type, data)
+			continue
+		}
+		if payload != entities.EmptyPayload {
+			t.Errorf("%s marshalled payload %v, v1 promises %s when there is nothing to say", ev.Type, payload, entities.EmptyPayload)
+		}
+	}
+
+	// A row written before the normalization existed still reads as `{}`, since
+	// the historical rows are tolerated rather than migrated.
+	historical := entities.SessionEvent{ID: "evt_old", SessionID: sessionID, Type: entities.EventSessionStarted}
+	data, err := json.Marshal(historical)
+	if err != nil {
+		t.Fatalf("marshal historical event: %v", err)
+	}
+	if !strings.Contains(string(data), `"payload":"{}"`) {
+		t.Errorf("a pre-normalization row does not render as %s: %s", entities.EmptyPayload, data)
+	}
 }
 
 // TestLargePayloadBecomesArtifactRefV1 freezes the offload rule. A reader that

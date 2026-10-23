@@ -17,12 +17,13 @@ import (
 type CheckpointService struct {
 	store     ports.Store
 	git       ports.GitService
+	artifact  *ArtifactService
 	logger    *slog.Logger
 	retention config.RetentionConfig
 }
 
-func NewCheckpointService(store ports.Store, git ports.GitService, logger *slog.Logger, retention config.RetentionConfig) *CheckpointService {
-	return &CheckpointService{store: store, git: git, logger: logger, retention: retention}
+func NewCheckpointService(store ports.Store, git ports.GitService, artifact *ArtifactService, logger *slog.Logger, retention config.RetentionConfig) *CheckpointService {
+	return &CheckpointService{store: store, git: git, artifact: artifact, logger: logger, retention: retention}
 }
 
 // Create builds the canonical snapshot (PRD §15) and stores it, inferring the
@@ -47,19 +48,89 @@ func (s *CheckpointService) CreateKind(ctx context.Context, sessionID, kind, lab
 // build it once, outside the transaction, instead of re-reading git inside it.
 // A non-empty nextAction overwrites the snapshot's own.
 func (s *CheckpointService) CreateFromSnapshot(ctx context.Context, sessionID, kind, label, nextAction, agent string, snapshot *entities.Snapshot) (*entities.Checkpoint, error) {
+	cp, err := buildCheckpoint(sessionID, kind, label, nextAction, agent, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.store.Tx(ctx, func(st ports.Store) error {
+		return s.write(ctx, st, cp)
+	}); err != nil {
+		return nil, err
+	}
+	s.PruneRetention(ctx, sessionID, cp.Kind)
+	s.logger.Info("checkpoint created", "checkpoint_id", cp.ID, "session_id", sessionID)
+	return cp, nil
+}
+
+// CreateFromSnapshotTx writes the checkpoint inside a transaction the caller has
+// already opened, so it commits with the rest of the caller's change.
+//
+// Retention is not applied here on purpose: pruning deletes rows, and running it
+// under the caller's transaction holds those deletes behind the same write lock
+// the caller is holding — which is the opposite of the housekeeping-after-commit
+// rule below. The caller runs PruneRetention after its own commit.
+func (s *CheckpointService) CreateFromSnapshotTx(ctx context.Context, st ports.Store, sessionID, kind, label, nextAction, agent string, snapshot *entities.Snapshot) (*entities.Checkpoint, error) {
+	cp, err := buildCheckpoint(sessionID, kind, label, nextAction, agent, snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.write(ctx, st, cp); err != nil {
+		return nil, err
+	}
+	return cp, nil
+}
+
+// write stores the checkpoint and the event announcing it.
+//
+// They commit together: an agent that reads the event log and follows
+// checkpoint_id must find the row, and a checkpoint nothing points at is invisible
+// to the timeline. Retention later removes both together (PruneKind), so the
+// reference never dangles.
+func (s *CheckpointService) write(ctx context.Context, st ports.Store, cp *entities.Checkpoint) error {
+	if err := st.Checkpoints().Create(ctx, cp); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]string{"checkpoint_id": cp.ID})
+	if err != nil {
+		return fmt.Errorf("marshal checkpoint payload: %w", err)
+	}
+	return s.artifact.AppendEventTx(ctx, st, cp.SessionID, cp.Agent, entities.EventCheckpointCreated, string(payload))
+}
+
+// PruneRetention applies the retention limit for one kind, so automatic
+// checkpoints cannot crowd out deliberate ones.
+//
+// It is housekeeping: a failure is logged rather than returned, because the
+// checkpoint it prunes around is already stored. It MUST run outside any open
+// transaction — it deletes rows, and a caller holding a write lock would hold the
+// deletes with it.
+func (s *CheckpointService) PruneRetention(ctx context.Context, sessionID, kind string) {
+	keep := s.retention.CheckpointLimit(kind)
+	if keep <= 0 {
+		return
+	}
+	pruned, err := s.store.Checkpoints().PruneKind(ctx, sessionID, kind, keep)
+	if err != nil {
+		s.logger.Warn("checkpoint retention failed", "session_id", sessionID, "kind", kind, "error", err)
+		return
+	}
+	if pruned > 0 {
+		s.logger.Info("checkpoints pruned", "session_id", sessionID, "kind", kind, "pruned", pruned, "keep", keep)
+	}
+}
+
+func buildCheckpoint(sessionID, kind, label, nextAction, agent string, snapshot *entities.Snapshot) (*entities.Checkpoint, error) {
 	if !entities.ValidCheckpointKind(kind) {
 		kind = entities.CheckpointKindManual
 	}
 	if nextAction != "" {
 		snapshot.NextAction = nextAction
 	}
-
 	data, err := json.Marshal(snapshot)
 	if err != nil {
 		return nil, domainerr.ErrInvalidSnapshot
 	}
-
-	cp := &entities.Checkpoint{
+	return &entities.Checkpoint{
 		ID:         ids.New("chk"),
 		SessionID:  sessionID,
 		TaskID:     snapshot.Task.ID,
@@ -68,46 +139,7 @@ func (s *CheckpointService) CreateFromSnapshot(ctx context.Context, sessionID, k
 		Snapshot:   string(data),
 		NextAction: snapshot.NextAction,
 		Agent:      agent,
-	}
-
-	// The checkpoint and the event announcing it commit together: an agent that
-	// reads the event log and follows checkpoint_id must always find the row, and
-	// a checkpoint nothing points at is invisible to the timeline.
-	if err := s.store.Tx(ctx, func(st ports.Store) error {
-		if err := st.Checkpoints().Create(ctx, cp); err != nil {
-			return err
-		}
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: sessionID,
-			Agent:     agent,
-			Type:      entities.EventCheckpointCreated,
-			Payload:   `{"checkpoint_id":"` + cp.ID + `"}`,
-		})
-	}); err != nil {
-		return nil, err
-	}
-
-	// Retention runs after the commit: it is housekeeping, and a failure must not
-	// roll back the checkpoint it was pruning around.
-	if keep := s.retention.CheckpointLimit(kind); keep > 0 {
-		if pruned, perr := s.store.Checkpoints().PruneKind(ctx, sessionID, kind, keep); perr != nil {
-			s.logger.Warn("checkpoint retention failed", "session_id", sessionID, "kind", kind, "error", perr)
-		} else if pruned > 0 {
-			s.logger.Info("checkpoints pruned", "session_id", sessionID, "kind", kind, "pruned", pruned, "keep", keep)
-		}
-	}
-
-	s.logger.Info("checkpoint created", "checkpoint_id", cp.ID, "session_id", sessionID)
-	return cp, nil
-}
-
-// withStore returns a copy bound to st, so a caller that has opened a transaction
-// can have the checkpoint written inside it.
-func (s *CheckpointService) withStore(st ports.Store) *CheckpointService {
-	scoped := *s
-	scoped.store = st
-	return &scoped
+	}, nil
 }
 
 // BuildSnapshot assembles the canonical state from stores and git.
@@ -158,12 +190,20 @@ func (s *CheckpointService) BuildSnapshotWith(ctx context.Context, sessionID str
 	taskStates := make([]entities.TaskState, 0, len(allTasks))
 	for _, t := range allTasks {
 		taskStates = append(taskStates, entities.TaskState{ID: t.ID, Title: t.Title, Status: t.Status})
-		switch t.Status {
-		case entities.TaskStatusCompleted:
+		switch {
+		case t.Status == entities.TaskStatusCompleted:
 			completed = append(completed, t.Title)
-		case entities.TaskStatusCancelled:
+		case t.Status == entities.TaskStatusCancelled:
 			// abandoned work is neither done nor outstanding; listing it as
 			// pending would show it as remaining work in every context render
+		case !entities.ValidTaskStatus(t.Status):
+			// A status outside the frozen vocabulary reached the row before Update
+			// started rejecting them, or was written by a build that knows a value
+			// this one does not. Either way this build cannot say whether the work
+			// is outstanding, and the `default` branch below used to answer
+			// "pending" — a claim about someone else's data. The row is still in
+			// progress.tasks with the status it holds, so nothing is dropped and a
+			// reader can see it is unclassified.
 		default:
 			pending = append(pending, t.Title)
 		}
@@ -299,12 +339,47 @@ type SnapshotDiff struct {
 	ResolvedBlockers []*entities.Blocker  `json:"resolved_blockers"`
 	NewlyCompleted   []string             `json:"newly_completed"`
 	NewlyStarted     []string             `json:"newly_started"`
-	TaskTransitions  []TaskTransition     `json:"task_transitions,omitempty"`
+	TaskTransitions  []TaskTransition     `json:"task_transitions"`
 	NewFiles         []string             `json:"new_files"`
 	NextActionFrom   string               `json:"next_action_from"`
 	NextActionTo     string               `json:"next_action_to"`
 	CommitFrom       string               `json:"commit_from"`
 	CommitTo         string               `json:"commit_to"`
+}
+
+// MarshalJSON emits every key with an empty list as `[]` rather than `null`.
+//
+// session.diff hands this straight to an agent over MCP, and the diff is built
+// from stores that return a nil slice for "nothing changed": a session with no new
+// blockers answered `"new_blockers": null`, and `task_transitions` was dropped
+// entirely, so a client had to treat three shapes — absent, null, empty — as the
+// same thing. Same reason Snapshot.MarshalJSON exists, and doing it here means a
+// new field cannot reintroduce the difference at one construction site.
+func (d SnapshotDiff) MarshalJSON() ([]byte, error) {
+	type diff SnapshotDiff // sheds this method, so json does not recurse
+	out := diff(d)
+	if out.NewDecisions == nil {
+		out.NewDecisions = []*entities.Decision{}
+	}
+	if out.NewBlockers == nil {
+		out.NewBlockers = []*entities.Blocker{}
+	}
+	if out.ResolvedBlockers == nil {
+		out.ResolvedBlockers = []*entities.Blocker{}
+	}
+	if out.NewlyCompleted == nil {
+		out.NewlyCompleted = []string{}
+	}
+	if out.NewlyStarted == nil {
+		out.NewlyStarted = []string{}
+	}
+	if out.TaskTransitions == nil {
+		out.TaskTransitions = []TaskTransition{}
+	}
+	if out.NewFiles == nil {
+		out.NewFiles = []string{}
+	}
+	return json.Marshal(out)
 }
 
 // HasChanges reports whether the diff contains any changes.

@@ -16,10 +16,12 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 // Command is a single slash command file.
@@ -86,27 +88,23 @@ func (c Command) FileName() string {
 
 // Render produces the markdown content for a command file. The managed marker
 // is placed after the frontmatter so parsers (opencode, cursor) that require
-// `---` as the first line still work.
+// `---` as the first line still work; agent.WriteManaged extends it with the
+// version and body digest when the file is written.
 func (c Command) Render() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "---\n")
 	fmt.Fprintf(&b, "description: %s\n", c.Description)
 	fmt.Fprintf(&b, "---\n")
-	fmt.Fprintf(&b, "<!-- agent-session:managed -->\n\n")
+	fmt.Fprintf(&b, "<!-- %s -->\n\n", agent.ManagedMarker)
 	b.WriteString(strings.TrimSpace(c.Prompt))
 	b.WriteString("\n")
 	return b.String()
 }
 
-// isManaged reports whether a file is owned by agent-session (has the managed
-// marker we write), so user-created or user-modified files are never touched.
-func isManaged(data string) bool {
-	return strings.Contains(data, "<!-- agent-session:managed -->")
-}
-
-// Install writes all command files into the given directory (created if
-// needed) and returns the paths written. It never overwrites a non-empty file
-// that isn't ours, and it is idempotent.
+// Install writes all command files into the given directory (created if needed)
+// and returns the paths written. It is idempotent, it never touches a file the
+// user wrote, and a command of ours that the user has since edited is kept and
+// reported as an *agent.Conflict rather than overwritten.
 func Install(dir string) ([]string, error) {
 	return InstallSet(dir, All())
 }
@@ -115,33 +113,31 @@ func Install(dir string) ([]string, error) {
 // MCP, so the universal prompts — which all instruct the agent to call MCP
 // tools — would tell it to do something it cannot do.
 func InstallSet(dir string, cmds []Command) ([]string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("create commands dir: %w", err)
-	}
 	var written []string
+	var errs []error
 	for _, c := range cmds {
 		path := filepath.Join(dir, c.FileName())
-		content := c.Render()
-		if existing, err := os.ReadFile(path); err == nil {
-			// never touch a file we don't own (user-created or heavily modified)
-			if !isManaged(string(existing)) {
-				continue
-			}
-			// already up to date
-			if string(existing) == content {
-				continue
-			}
+		// One definition of "ours" for every generated file: a local predicate
+		// went stale the moment the marker grew a version and a digest, and a
+		// stale one makes init stop updating these files and uninstall leave
+		// them behind.
+		wrote, err := agent.WriteManaged(path, c.Render())
+		if err != nil {
+			// A command the user edited must not stop the rest of the set from
+			// being installed, so conflicts are collected rather than returned.
+			errs = append(errs, err)
+			continue
 		}
-		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-			return written, fmt.Errorf("write %s: %w", path, err)
+		if wrote {
+			written = append(written, path)
 		}
-		written = append(written, path)
 	}
-	return written, nil
+	return written, errors.Join(errs...)
 }
 
-// Uninstall removes the agent-session command files from the given directory.
-// Files not owned by us are left untouched. Returns the count removed.
+// Uninstall removes the agent-session command files from the given directory and
+// returns the count removed. A file the user wrote is left untouched, and one of
+// ours that the user has since edited is kept and reported as an *agent.Conflict.
 func Uninstall(dir string) (int, error) {
 	return UninstallSet(dir, All())
 }
@@ -149,19 +145,16 @@ func Uninstall(dir string) (int, error) {
 // UninstallSet is Uninstall for a custom command set (see InstallSet).
 func UninstallSet(dir string, cmds []Command) (int, error) {
 	removed := 0
+	var errs []error
 	for _, c := range cmds {
-		path := filepath.Join(dir, c.FileName())
-		data, err := os.ReadFile(path)
+		gone, err := agent.RemoveManaged(filepath.Join(dir, c.FileName()))
 		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
-		if !isManaged(string(data)) {
-			continue
+		if gone {
+			removed++
 		}
-		if err := os.Remove(path); err != nil {
-			return removed, fmt.Errorf("remove %s: %w", path, err)
-		}
-		removed++
 	}
-	return removed, nil
+	return removed, errors.Join(errs...)
 }

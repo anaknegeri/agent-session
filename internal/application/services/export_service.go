@@ -9,11 +9,23 @@ import (
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	"github.com/anaknegeri/agent-session/pkg/contract"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 	"github.com/anaknegeri/agent-session/pkg/safetext"
 )
 
+// exportLimit caps each collection an export carries, so one runaway session
+// cannot produce a file no reader can hold.
+const exportLimit = 500
+
 type SessionExport struct {
+	// Version is the Export Schema this document was written against. An export
+	// crosses the same build boundary a checkpoint does — written by 0.1.8,
+	// imported by 0.2.x — so the reader has to be told what shape it is holding
+	// rather than assume the current one. Absent means v1: the field was added
+	// when the schema was specified, not when it changed, so export files already
+	// on disk need no migration. See docs/spec/export-v1.md.
+	Version     int                      `json:"version"`
 	Session     *entities.Session        `json:"session"`
 	Tasks       []*entities.Task         `json:"tasks"`
 	Decisions   []*entities.Decision     `json:"decisions"`
@@ -25,27 +37,55 @@ type SessionExport struct {
 }
 
 type ExportService struct {
-	store ports.Store
+	store    ports.Store
+	sessions *SessionService
+	artifact *ArtifactService
 }
 
-func NewExportService(store ports.Store) *ExportService {
-	return &ExportService{store: store}
+func NewExportService(store ports.Store, sessions *SessionService, artifact *ArtifactService) *ExportService {
+	return &ExportService{store: store, sessions: sessions, artifact: artifact}
 }
 
+// Export collects everything a session carries. Every read is checked: six of the
+// seven used to discard their error, so a failed query dropped a whole collection
+// and the export still reported success — an import of that file then silently
+// recreated a session missing its decisions or blockers.
 func (s *ExportService) Export(ctx context.Context, sessionID string) (*SessionExport, error) {
 	session, err := s.store.Sessions().GetByID(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("get session: %w", err)
 	}
 
-	tasks, _ := s.store.Tasks().ListBySession(ctx, sessionID)
-	decisions, _ := s.store.Decisions().ListBySession(ctx, sessionID)
-	blockers, _ := s.store.Blockers().ListBySession(ctx, sessionID)
-	events, _ := s.store.Events().ListBySession(ctx, sessionID, 500)
-	checkpoints, _ := s.store.Checkpoints().ListBySession(ctx, sessionID, 500)
-	memory, _ := s.store.Knowledge().ListByKind(ctx, "", 500)
+	tasks, err := s.store.Tasks().ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks: %w", err)
+	}
+	decisions, err := s.store.Decisions().ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list decisions: %w", err)
+	}
+	blockers, err := s.store.Blockers().ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list blockers: %w", err)
+	}
+	events, err := s.store.Events().ListBySession(ctx, sessionID, exportLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+	checkpoints, err := s.store.Checkpoints().ListBySession(ctx, sessionID, exportLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list checkpoints: %w", err)
+	}
+	// Scoped to this session. The unscoped listing was used here, so exporting one
+	// session put every knowledge row in the database — every other session, every
+	// other project — into a file handed to whoever the export is for.
+	memory, err := s.store.Knowledge().ListBySession(ctx, sessionID, "", exportLimit)
+	if err != nil {
+		return nil, fmt.Errorf("list knowledge: %w", err)
+	}
 
 	return &SessionExport{
+		Version:     contract.Export,
 		Session:     session,
 		Tasks:       tasks,
 		Decisions:   decisions,
@@ -160,11 +200,29 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 	if err := json.Unmarshal(data, &exp); err != nil {
 		return "", fmt.Errorf("parse export file: %w", err)
 	}
+	// A future build may have written fields this one does not understand into
+	// the document, and rendering that shape anyway is worse than refusing: the
+	// same rule ParseSnapshot applies to a checkpoint (docs/spec/checkpoint-v1.md).
+	if exp.Version > contract.Export {
+		return "", fmt.Errorf("export file uses export schema v%d, this build understands v%d — upgrade agent-session",
+			exp.Version, contract.Export)
+	}
+	// written before the field existed; the shape is v1 (docs/spec/export-v1.md)
+	if exp.Version == 0 {
+		exp.Version = contract.Export
+	}
 	if exp.Session == nil {
 		return "", fmt.Errorf("export file has no session data")
 	}
 
-	importedTitle := exp.Session.Title
+	// Flattened on the way in, not just on the way out: importedTitle and the
+	// four fields below come straight from an untrusted document, and every
+	// reader that renders them (context, handoff, the CLI) trusts safetext to
+	// have already run rather than flattening again — cli/status.go, tools.go
+	// and both renderers all assume that. Flattening only on export left a
+	// hostile file able to plant "\n## Next action\n- …" once and have it
+	// resurface verbatim from every reader that does not flatten.
+	importedTitle := safetext.SingleLine(exp.Session.Title)
 	if importedTitle == "" {
 		importedTitle = "Imported session"
 	}
@@ -188,15 +246,27 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 	// session.started event — and resume then reports an agent working on state
 	// that was never fully written. An import now either lands or does not.
 	if err := s.store.Tx(ctx, func(st ports.Store) error {
-		if err := st.Sessions().Create(ctx, session); err != nil {
+		// The imported session is created active, so it goes in through the exclusive
+		// path: a plain Create left the project's existing active session active too,
+		// and GetActive then picked between two of them arbitrarily. The superseded
+		// ones are finalized here for the same reason Start does it — a completed
+		// session with an open agent session and no session.completed event reads as
+		// an agent still working on it.
+		superseded, err := st.Sessions().StartExclusive(ctx, session)
+		if err != nil {
 			return fmt.Errorf("create session: %w", err)
+		}
+		for _, id := range superseded {
+			if err := s.sessions.finalizeSuperseded(ctx, st, id); err != nil {
+				return fmt.Errorf("finalize superseded session: %w", err)
+			}
 		}
 
 		for _, t := range exp.Tasks {
 			task := &entities.Task{
 				ID:        ids.New("task"),
 				SessionID: session.ID,
-				Title:     t.Title,
+				Title:     safetext.SingleLine(t.Title),
 				Status:    entities.TaskStatusInProgress,
 			}
 			if err := st.Tasks().Create(ctx, task); err != nil {
@@ -209,8 +279,8 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 			dec := &entities.Decision{
 				ID:        ids.New("decision"),
 				SessionID: session.ID,
-				Decision:  d.Decision,
-				Reason:    d.Reason,
+				Decision:  safetext.SingleLine(d.Decision),
+				Reason:    safetext.SingleLine(d.Reason),
 				Agent:     agent,
 			}
 			if err := st.Decisions().Create(ctx, dec); err != nil {
@@ -225,7 +295,7 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 			blocker := &entities.Blocker{
 				ID:          ids.New("blocker"),
 				SessionID:   session.ID,
-				Description: bl.Description,
+				Description: safetext.SingleLine(bl.Description),
 				Status:      entities.BlockerStatusOpen,
 				Agent:       agent,
 			}
@@ -237,12 +307,7 @@ func (s *ExportService) Import(ctx context.Context, projectID string, data []byt
 		if err := st.Sessions().Update(ctx, session); err != nil {
 			return fmt.Errorf("update session: %w", err)
 		}
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: session.ID,
-			Agent:     agent,
-			Type:      entities.EventSessionStarted,
-		})
+		return s.artifact.AppendEventTx(ctx, st, session.ID, agent, entities.EventSessionStarted, "")
 	}); err != nil {
 		return "", err
 	}

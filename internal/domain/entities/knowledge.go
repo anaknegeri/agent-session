@@ -16,6 +16,29 @@ const (
 	KnowledgeSourceCheckpoint = "checkpoint"
 )
 
+// knowledgeKinds is the frozen knowledge kind vocabulary of format-v1.md. It is
+// closed because kind is how knowledge is retrieved: `memory.get`-by-kind and the
+// context injection both filter on it, so a row stored under an undocumented kind
+// is a row nothing ever reads back.
+var knowledgeKinds = map[string]bool{
+	KnowledgeKindProject:      true,
+	KnowledgeKindArchitecture: true,
+	KnowledgeKindSolution:     true,
+	KnowledgeKindPreference:   true,
+	KnowledgeKindSkill:        true,
+}
+
+// ValidKnowledgeKind reports whether kind is one of the documented knowledge kinds.
+func ValidKnowledgeKind(kind string) bool {
+	return knowledgeKinds[kind]
+}
+
+// KnowledgeKinds returns the documented knowledge kinds in sorted order, for
+// callers that have to tell a human which values are accepted.
+func KnowledgeKinds() []string {
+	return sortedKeys(knowledgeKinds)
+}
+
 type Knowledge struct {
 	ID         string    `json:"id" db:"id"`
 	SessionID  string    `json:"session_id" db:"session_id"`

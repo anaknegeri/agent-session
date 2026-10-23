@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 // hooksFile reads $CODEX_HOME/hooks.json as a generic tree.
@@ -170,6 +172,103 @@ func TestUninstallRemovesOnlyOurHooks(t *testing.T) {
 	}
 	if !strings.Contains(start, "/other/start.sh") {
 		t.Errorf("uninstall removed another tool's hook: %q", start)
+	}
+}
+
+// json.MarshalIndent escapes HTML, so the shell command we installed was stored
+// as `[ -d .agent ] \u0026\u0026 agent-session resume …`: valid JSON that reads
+// like corruption to the person auditing what an installer put in their agent.
+func TestInstallWritesReadableShellCommands(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	if err := NewAdapter().Install(context.Background()); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "hooks.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `\u0026`) {
+		t.Errorf("shell operators were HTML-escaped:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "&&") {
+		t.Errorf("hooks.json does not contain the command as written:\n%s", raw)
+	}
+}
+
+// Ownership by "the command mentions agent-session" also claims a user's own
+// wrapper script and deletes it on uninstall.
+func TestUninstallKeepsAUserHookThatMerelyMentionsAgentSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+
+	const mine = "~/bin/my-agent-session-wrapper.sh"
+	existing := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"` + mine + `"}]}]}}`
+	if err := os.WriteFile(filepath.Join(home, "hooks.json"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := NewAdapter()
+	if err := a.Install(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Uninstall(context.Background()); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	start := strings.Join(commandsFor(t, hooksFile(t, home), "SessionStart"), " ")
+	if !strings.Contains(start, mine) {
+		t.Errorf("uninstall deleted the user's own hook: %q", start)
+	}
+	if strings.Contains(start, "agent-session resume") {
+		t.Errorf("our own hook survived uninstall: %q", start)
+	}
+}
+
+func TestOwnsEntry(t *testing.T) {
+	cmdEntry := func(command string) map[string]any {
+		return map[string]any{"hooks": []any{map[string]any{"type": "command", "command": command}}}
+	}
+	ourEntry := cmdEntry("[ -d .agent ] && agent-session resume --agent codex || true")
+	ourEntry[agent.ManagedByKey] = agent.ManagedByValue
+
+	cases := []struct {
+		name  string
+		entry any
+		want  bool
+	}{
+		{"entry we wrote", ourEntry, true},
+		// Installs from before the explicit key still have to be removable.
+		{"legacy entry", cmdEntry("[ -d .agent ] && agent-session checkpoint --label auto || true"), true},
+		{"user wrapper named after us", cmdEntry("~/bin/my-agent-session-wrapper.sh"), false},
+		{"another tool", cmdEntry("/other/start.sh"), false},
+		{"not an object", "nonsense", false},
+		{"no hooks list", map[string]any{"matcher": "*"}, false},
+	}
+	for _, tc := range cases {
+		if got := ownsEntry(tc.entry); got != tc.want {
+			t.Errorf("%s: ownsEntry = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Install has to mark what it writes, or the next release's uninstall has only
+// the command string to go on.
+func TestInstallMarksItsEntries(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	if err := NewAdapter().Install(context.Background()); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	hooks, _ := hooksFile(t, home)["hooks"].(map[string]any)
+	entries, _ := hooks["SessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("expected one SessionStart entry, got %v", entries)
+	}
+	group, _ := entries[0].(map[string]any)
+	if !agent.OwnsJSONEntry(group) {
+		t.Errorf("our hook entry carries no ownership key: %v", group)
 	}
 }
 

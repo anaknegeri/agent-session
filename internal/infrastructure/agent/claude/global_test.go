@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 func TestEnsureGlobalHooks(t *testing.T) {
@@ -108,6 +110,95 @@ func TestRemoveGlobalHooks(t *testing.T) {
 	}
 	if _, ok := hooks2["Notification"]; !ok {
 		t.Fatalf("expected unrelated Notification hook to survive: %s", data2)
+	}
+}
+
+// Ownership by "the command mentions agent-session" also claims a user's own
+// wrapper script, so RemoveHooks deleted a hook we never installed.
+func TestRemoveHooksKeepsAUserHookThatMerelyMentionsAgentSession(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	const mine = "~/bin/my-agent-session-wrapper.sh"
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := `{"hooks":{"SessionStart":[{"matcher":"*","hooks":[{"type":"command","command":"` + mine + `"}]}]}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := EnsureGlobalHooks(home); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	if err := RemoveGlobalHooks(home); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the user's settings file was deleted with their hook in it: %v", err)
+	}
+	if !strings.Contains(string(data), mine) {
+		t.Errorf("uninstall deleted the user's own hook:\n%s", data)
+	}
+	if strings.Contains(string(data), "agent-session resume") {
+		t.Errorf("our own hook survived uninstall:\n%s", data)
+	}
+}
+
+// EnsureHooks has to mark what it writes, or the only thing removal can key on is
+// the command string.
+func TestEnsureHooksMarksItsEntries(t *testing.T) {
+	home := t.TempDir()
+	if err := EnsureGlobalHooks(home); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(GlobalSettingsPath(home))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatal(err)
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	entries, _ := hooks["SessionStart"].([]any)
+	if len(entries) != 1 {
+		t.Fatalf("expected one SessionStart entry, got %v", entries)
+	}
+	group, _ := entries[0].(map[string]any)
+	if !agent.OwnsJSONEntry(group) {
+		t.Errorf("our hook entry carries no ownership key: %v", group)
+	}
+}
+
+func TestIsAgentSessionEntry(t *testing.T) {
+	entry := func(command string) map[string]any {
+		return map[string]any{
+			"matcher": "*",
+			"hooks":   []any{map[string]any{"type": "command", "command": command}},
+		}
+	}
+	ours := entry("cd \"$CLAUDE_PROJECT_DIR\" && [ -d .agent ] && agent-session resume --agent claude || true")
+	ours[agent.ManagedByKey] = agent.ManagedByValue
+
+	cases := []struct {
+		name string
+		in   any
+		want bool
+	}{
+		{"entry we wrote", ours, true},
+		// An install from a release before the key, including the older command
+		// shape that had no $CLAUDE_PROJECT_DIR guard.
+		{"legacy entry", entry("[ -d .agent ] && agent-session checkpoint --label auto || true"), true},
+		{"user wrapper named after us", entry("~/bin/my-agent-session-wrapper.sh"), false},
+		{"another tool", entry("say done"), false},
+		{"not an object", 42, false},
+	}
+	for _, tc := range cases {
+		if got := isAgentSessionEntry(tc.in); got != tc.want {
+			t.Errorf("%s: isAgentSessionEntry = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }
 

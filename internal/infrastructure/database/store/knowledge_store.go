@@ -47,8 +47,22 @@ func (s *knowledgeStore) GetByID(ctx context.Context, id string) (*entities.Know
 }
 
 func (s *knowledgeStore) ListByKind(ctx context.Context, kind string, limit int) ([]*entities.Knowledge, error) {
-	var rows []*entities.Knowledge
-	q := s.db.WithContext(ctx).Order("created_at DESC")
+	return s.list(s.db.WithContext(ctx), kind, limit)
+}
+
+// ListBySession lists the knowledge of one session. Export used the unscoped
+// listing, so exporting a single session shipped every knowledge row in the
+// database — including other projects' — to whoever received the file.
+func (s *knowledgeStore) ListBySession(ctx context.Context, sessionID, kind string, limit int) ([]*entities.Knowledge, error) {
+	return s.list(s.db.WithContext(ctx).Where("session_id = ?", sessionID), kind, limit)
+}
+
+func (s *knowledgeStore) list(q *gorm.DB, kind string, limit int) ([]*entities.Knowledge, error) {
+	// Empty, not nil, for the same reason the FTS search below is: memory://recent
+	// marshals this over MCP, and a project with no knowledge under the requested
+	// kind answered bare `null`.
+	rows := []*entities.Knowledge{}
+	q = q.Order("created_at DESC")
 	if kind != "" {
 		q = q.Where("kind = ?", kind)
 	}
@@ -87,7 +101,10 @@ func (s *knowledgeStore) search(ctx context.Context, match string, limit int) ([
 	        WHERE knowledge_fts MATCH ?
 	        ORDER BY bm25(knowledge_fts)
 	        LIMIT ?`
-	var hits []*entities.KnowledgeHit
+	// Raw().Scan() leaves the slice nil when nothing matched, and memory.search
+	// marshals it straight out over MCP: a client asking for a term with no hits
+	// was handed bare `null` instead of an empty list.
+	hits := []*entities.KnowledgeHit{}
 	if err := s.db.WithContext(ctx).Raw(sql, match, limit).Scan(&hits).Error; err != nil {
 		return nil, fmt.Errorf("search knowledge: %w", err)
 	}

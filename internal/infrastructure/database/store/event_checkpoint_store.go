@@ -91,37 +91,69 @@ func (s *checkpointStore) ListBySession(ctx context.Context, sessionID string, l
 }
 
 // PruneKind deletes the oldest checkpoints of one kind beyond keep and returns
-// how many rows were removed.
+// how many checkpoint rows were removed.
 //
 // The session's most recent checkpoint is excluded whatever its kind, because
 // resume and restore read that one. For the current caller — which prunes the
 // kind it has just written — that exclusion is redundant, since the newest row is
 // always among the newest of its own kind; it guards a caller that prunes a kind
 // other than the one just created, such as a retention sweep.
+//
+// The checkpoint.created event announcing a pruned checkpoint is deleted in the
+// same transaction. A checkpoint is announced by an event carrying its id, and
+// retention used to remove only the row: after the 21st auto checkpoint the
+// timeline was full of checkpoint_ids resolving to "checkpoint not found", which a
+// reader cannot tell apart from a bad id. This is the one exception to the log
+// being append-only, and it is documented in docs/spec/event-v1.md.
 func (s *checkpointStore) PruneKind(ctx context.Context, sessionID, kind string, keep int) (int, error) {
 	if keep <= 0 {
 		return 0, nil
 	}
-	res := s.db.WithContext(ctx).Exec(`
-		DELETE FROM checkpoints
-		WHERE session_id = ? AND kind = ?
-		  AND id NOT IN (
-		      SELECT id FROM checkpoints
-		      WHERE session_id = ? AND kind = ?
-		      ORDER BY created_at DESC, id DESC
-		      LIMIT ?
-		  )
-		  AND id <> (
-		      SELECT id FROM checkpoints
-		      WHERE session_id = ?
-		      ORDER BY created_at DESC, id DESC
-		      LIMIT 1
-		  )`,
-		sessionID, kind, sessionID, kind, keep, sessionID)
-	if res.Error != nil {
-		return 0, fmt.Errorf("prune checkpoints: %w", res.Error)
+	pruned := 0
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var doomed []string
+		if err := tx.Raw(`
+			SELECT id FROM checkpoints
+			WHERE session_id = ? AND kind = ?
+			  AND id NOT IN (
+			      SELECT id FROM checkpoints
+			      WHERE session_id = ? AND kind = ?
+			      ORDER BY created_at DESC, id DESC
+			      LIMIT ?
+			  )
+			  AND id <> (
+			      SELECT id FROM checkpoints
+			      WHERE session_id = ?
+			      ORDER BY created_at DESC, id DESC
+			      LIMIT 1
+			  )`,
+			sessionID, kind, sessionID, kind, keep, sessionID).Scan(&doomed).Error; err != nil {
+			return fmt.Errorf("select prunable checkpoints: %w", err)
+		}
+		if len(doomed) == 0 {
+			return nil
+		}
+		for _, id := range doomed {
+			// matched by containment: the id is a unique generated token, and the
+			// payload around it is the announcing event's own JSON
+			if err := tx.Exec(
+				`DELETE FROM session_events WHERE session_id = ? AND type = ? AND payload LIKE '%' || ? || '%'`,
+				sessionID, entities.EventCheckpointCreated, id,
+			).Error; err != nil {
+				return fmt.Errorf("prune checkpoint events: %w", err)
+			}
+		}
+		res := tx.Exec(`DELETE FROM checkpoints WHERE id IN (?)`, doomed)
+		if res.Error != nil {
+			return fmt.Errorf("prune checkpoints: %w", res.Error)
+		}
+		pruned = int(res.RowsAffected)
+		return nil
+	})
+	if err != nil {
+		return 0, err
 	}
-	return int(res.RowsAffected), nil
+	return pruned, nil
 }
 
 var (

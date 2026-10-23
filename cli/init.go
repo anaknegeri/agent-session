@@ -98,13 +98,13 @@ func newInitCmd() *cobra.Command {
 func installAgentGlobal(bin, name string) {
 	switch name {
 	case "claude":
-		if err := installClaudeGlobal(bin); err != nil {
+		if err := keptUserEdits(installClaudeGlobal(bin)); err != nil {
 			red("✗ claude (user scope): %v\n", err)
 			return
 		}
 		green("✓ claude: registered at user scope + hooks + CLAUDE.md rule (always compliant)\n")
 	case "opencode":
-		if err := installOpenCodeGlobal(bin); err != nil {
+		if err := keptUserEdits(installOpenCodeGlobal(bin)); err != nil {
 			red("✗ opencode: %v\n", err)
 			return
 		}
@@ -112,7 +112,7 @@ func installAgentGlobal(bin, name string) {
 	case "codex":
 		installCodex(bin)
 	case "cursor":
-		if err := installCursorGlobal(bin); err != nil {
+		if err := keptUserEdits(installCursorGlobal(bin)); err != nil {
 			red("✗ cursor: %v\n", err)
 			return
 		}
@@ -120,13 +120,13 @@ func installAgentGlobal(bin, name string) {
 	case "cline":
 		red("✗ cline has no user scope; use `init --only cline` for per-project wiring\n")
 	case "pi":
-		if err := installPiGlobal(bin); err != nil {
+		if err := keptUserEdits(installPiGlobal(bin)); err != nil {
 			red("✗ pi: %v\n", err)
 			return
 		}
 		green("✓ pi: ~/.pi/agent extension + skill + prompts (CLI, not MCP — pi ships none)\n")
 	case "omp":
-		if err := installOmpGlobal(bin); err != nil {
+		if err := keptUserEdits(installOmpGlobal(bin)); err != nil {
 			red("✗ omp: %v\n", err)
 			return
 		}

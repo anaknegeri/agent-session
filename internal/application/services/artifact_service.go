@@ -2,7 +2,9 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
@@ -47,28 +49,77 @@ func (s *ArtifactService) Store(ctx context.Context, sessionID, kind, path, cont
 	return artifact.ID, nil
 }
 
-// AppendEvent records a canonical event. Payloads larger than
-// LargePayloadThreshold are stored as artifacts and referenced by ID.
+// AppendEvent records a canonical event. It is the only append path a service or
+// an entrypoint may use: the closed type namespace, the payload size cap and the
+// artifact offload are applied here and nowhere else, so a caller that reaches for
+// EventRepository.Append directly skips all three.
 //
-// The offloaded artifact and the event referencing it commit together, so a
-// failed append cannot leave a stored payload nothing points at.
+// Payloads larger than LargePayloadThreshold are stored as an artifact and
+// referenced by ID. The artifact and the event referencing it commit together, so
+// a failed append cannot leave a stored payload nothing points at.
 func (s *ArtifactService) AppendEvent(ctx context.Context, sessionID, agent, eventType, payload string) error {
-	if !entities.IsCanonicalEventType(eventType) {
-		return domainerr.ErrInvalidEventType
-	}
-	if len(payload) > MaxPayloadSize {
-		return fmt.Errorf("event payload is %d bytes, over the %d byte limit", len(payload), MaxPayloadSize)
+	payload, err := eventPayload(eventType, payload)
+	if err != nil {
+		return err
 	}
 	if len(payload) <= LargePayloadThreshold {
 		return s.appendEvent(ctx, s.store, sessionID, agent, eventType, payload)
 	}
 	return s.store.Tx(ctx, func(st ports.Store) error {
-		artifactID, err := s.withStore(st).Store(ctx, sessionID, artifactKind(eventType), "", payload)
-		if err != nil {
-			return err
-		}
-		return s.appendEvent(ctx, st, sessionID, agent, eventType, fmt.Sprintf(`{"artifact_id":"%s"}`, artifactID))
+		return s.offloadAndAppend(ctx, st, sessionID, agent, eventType, payload)
 	})
+}
+
+// AppendEventTx is AppendEvent for a caller that has already opened a
+// transaction, so the event commits with the state change it describes instead of
+// separately from it. It deliberately opens no transaction of its own: GORM turns
+// a nested one into a SAVEPOINT, which buys nothing here because the caller's
+// boundary already covers both writes.
+func (s *ArtifactService) AppendEventTx(ctx context.Context, st ports.Store, sessionID, agent, eventType, payload string) error {
+	payload, err := eventPayload(eventType, payload)
+	if err != nil {
+		return err
+	}
+	if len(payload) <= LargePayloadThreshold {
+		return s.appendEvent(ctx, st, sessionID, agent, eventType, payload)
+	}
+	return s.offloadAndAppend(ctx, st, sessionID, agent, eventType, payload)
+}
+
+// Get returns an offloaded payload. The session scopes the lookup: an artifact_id
+// read out of one session's event log resolves to nothing in another.
+func (s *ArtifactService) Get(ctx context.Context, sessionID, id string) (*entities.Artifact, error) {
+	return s.store.Artifacts().GetByID(ctx, id, sessionID)
+}
+
+// eventPayload validates a caller-supplied payload and returns what to store.
+//
+// An empty payload becomes `{}`: event-v1.md promises `payload` is JSON text and
+// `{}` when there is nothing to say, and a row holding an empty string makes
+// every reader either parse that as JSON or special-case it.
+func eventPayload(eventType, payload string) (string, error) {
+	if !entities.IsCanonicalEventType(eventType) {
+		return "", domainerr.ErrInvalidEventType
+	}
+	if len(payload) > MaxPayloadSize {
+		return "", fmt.Errorf("event payload is %d bytes, over the %d byte limit", len(payload), MaxPayloadSize)
+	}
+	if strings.TrimSpace(payload) == "" {
+		return entities.EmptyPayload, nil
+	}
+	return payload, nil
+}
+
+func (s *ArtifactService) offloadAndAppend(ctx context.Context, st ports.Store, sessionID, agent, eventType, payload string) error {
+	artifactID, err := s.withStore(st).Store(ctx, sessionID, artifactKind(eventType), "", payload)
+	if err != nil {
+		return err
+	}
+	ref, err := json.Marshal(map[string]string{"artifact_id": artifactID})
+	if err != nil {
+		return fmt.Errorf("marshal artifact reference: %w", err)
+	}
+	return s.appendEvent(ctx, st, sessionID, agent, eventType, string(ref))
 }
 
 func (s *ArtifactService) appendEvent(ctx context.Context, st ports.Store, sessionID, agent, eventType, payload string) error {

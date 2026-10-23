@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
@@ -23,6 +24,7 @@ var supportedHandoffAgents = map[string]bool{
 type HandoffService struct {
 	store       ports.Store
 	checkpoints *CheckpointService
+	artifact    *ArtifactService
 	renderer    ports.ContextRenderer
 	budget      ports.ContextBudget
 	logger      *slog.Logger
@@ -31,11 +33,12 @@ type HandoffService struct {
 func NewHandoffService(
 	store ports.Store,
 	checkpoints *CheckpointService,
+	artifact *ArtifactService,
 	renderer ports.ContextRenderer,
 	budget ports.ContextBudget,
 	logger *slog.Logger,
 ) *HandoffService {
-	return &HandoffService{store: store, checkpoints: checkpoints, renderer: renderer, budget: budget, logger: logger}
+	return &HandoffService{store: store, checkpoints: checkpoints, artifact: artifact, renderer: renderer, budget: budget, logger: logger}
 }
 
 // Handoff composes a deterministic handoff context for the target agent (UC-04).
@@ -74,7 +77,7 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 	// never handed the context, or a checkpoint no handoff event refers to.
 	if err := s.store.Tx(ctx, func(st ports.Store) error {
 		var err error
-		cp, err = s.checkpoints.withStore(st).CreateFromSnapshot(ctx, sessionID, entities.CheckpointKindHandoff, "handoff", "", from, snapshot)
+		cp, err = s.checkpoints.CreateFromSnapshotTx(ctx, st, sessionID, entities.CheckpointKindHandoff, "handoff", "", from, snapshot)
 		if err != nil {
 			return err
 		}
@@ -84,22 +87,25 @@ func (s *HandoffService) Handoff(ctx context.Context, sessionID, to string) (str
 			return err
 		}
 
-		payload, _ := json.Marshal(map[string]string{
+		payload, err := json.Marshal(map[string]string{
 			"handoff_id":    handoffID,
 			"from_agent":    from,
 			"to_agent":      to,
 			"checkpoint_id": cp.ID,
 		})
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: sessionID,
-			Agent:     from,
-			Type:      entities.EventHandoffCreated,
-			Payload:   string(payload),
-		})
+		if err != nil {
+			return fmt.Errorf("marshal handoff payload: %w", err)
+		}
+		return s.artifact.AppendEventTx(ctx, st, sessionID, from, entities.EventHandoffCreated, string(payload))
 	}); err != nil {
 		return "", err
 	}
+
+	// Retention runs on the unscoped store after the commit. It deletes rows, and
+	// it used to run through the transaction-scoped store the checkpoint was
+	// written with — holding the deletes under the handoff write lock, which is the
+	// opposite of what "housekeeping after the commit" means.
+	s.checkpoints.PruneRetention(ctx, sessionID, entities.CheckpointKindHandoff)
 
 	s.logger.Info("handoff created",
 		"handoff_id", handoffID,

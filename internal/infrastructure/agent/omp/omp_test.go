@@ -3,6 +3,7 @@ package omp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,10 +61,15 @@ func TestEnsureResourcesWritesEverything(t *testing.T) {
 	if !strings.Contains(ext, "SHUTDOWN_TIMEOUT_MS") {
 		t.Error("the shutdown checkpoint does not use a budget that fits omp's 2s teardown cap")
 	}
-	// One resume per process: the same module instance is handed to every task
-	// subagent runner, and resume closes and reopens the agent_session row.
-	if !strings.Contains(ext, "if (resumed) return;") {
-		t.Error("session_start is not guarded, so every subagent session would resume again")
+	// One resume per project root per process: the same module instance is handed
+	// to every task subagent runner, and resume closes and reopens the
+	// agent_session row. Keyed by root, not a single flag, because a subagent can
+	// start in a git worktree — a different directory, possibly its own project.
+	if !strings.Contains(ext, "resumedRoots.has(root)") || !strings.Contains(ext, "resumedRoots.add(root)") {
+		t.Error("session_start is not guarded per project root, so a subagent would resume again or a second project would never resume")
+	}
+	if strings.Contains(ext, "let resumed = false") {
+		t.Error("the process-wide resume flag is back; one omp process can reach more than one project root")
 	}
 
 	skill := read(t, filepath.Join(skillDir(root), "SKILL.md"))
@@ -334,6 +340,58 @@ func TestEnsureResourcesLeavesForeignFiles(t *testing.T) {
 	}
 	if got := read(t, ExtensionPath(root)); got != mine {
 		t.Error("uninstall removed an extension it does not own")
+	}
+}
+
+// The case the bare marker got wrong: an extension we generated and the user then
+// tuned. It carries our marker, so setup used to overwrite it on the next `init`.
+func TestEnsureResourcesKeepsAndReportsATunedExtension(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".omp")
+	if err := EnsureResources(root, "agent-session"); err != nil {
+		t.Fatalf("ensure resources: %v", err)
+	}
+	tuned := read(t, ExtensionPath(root)) + "\n// my own hook\n"
+	if err := os.WriteFile(ExtensionPath(root), []byte(tuned), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := EnsureResources(root, "agent-session-v2")
+	if !errors.Is(err, agent.ErrUserModified) {
+		t.Fatalf("a tuned extension was not reported: %v", err)
+	}
+	if got := read(t, ExtensionPath(root)); got != tuned {
+		t.Errorf("the user's edit was overwritten:\n%s", got)
+	}
+	// The rest of the wiring still lands: one tuned file must not skip the skill.
+	if _, statErr := os.Stat(filepath.Join(skillDir(root), "SKILL.md")); statErr != nil {
+		t.Errorf("skill missing after a conflict on the extension: %v", statErr)
+	}
+
+	err = RemoveResources(root)
+	if !errors.Is(err, agent.ErrUserModified) {
+		t.Fatalf("uninstall did not report the extension it kept: %v", err)
+	}
+	if got := read(t, ExtensionPath(root)); got != tuned {
+		t.Error("uninstall deleted an extension the user had tuned")
+	}
+}
+
+// Declining to write must not leave the directory behind: an empty
+// .omp/extensions/ in a project we then leave alone advertises wiring that is
+// not there.
+func TestEnsureSkillCreatesNoDirectoryForAFileItWillNotWrite(t *testing.T) {
+	root := filepath.Join(t.TempDir(), ".omp")
+	if err := EnsureSkill(root); err != nil {
+		t.Fatalf("ensure skill: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(skillDir(root), "SKILL.md")); err != nil {
+		t.Fatalf("skill not written: %v", err)
+	}
+	if err := RemoveResources(root); err != nil {
+		t.Fatalf("remove resources: %v", err)
+	}
+	if _, err := os.Stat(skillDir(root)); !os.IsNotExist(err) {
+		t.Errorf("uninstall left the skill directory behind: %v", err)
 	}
 }
 

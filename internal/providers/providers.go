@@ -10,20 +10,20 @@ import (
 	gitrunner "github.com/anaknegeri/agent-session/internal/infrastructure/git"
 )
 
-func ProvideInitService(store ports.Store, git ports.GitService, logger *slog.Logger) *app.InitService {
-	return app.NewInitService(store, git, logger)
+func ProvideInitService(store ports.Store, git ports.GitService, artifact *app.ArtifactService, logger *slog.Logger) *app.InitService {
+	return app.NewInitService(store, git, artifact, logger)
 }
 
-func ProvideSessionService(store ports.Store, git ports.GitService, logger *slog.Logger) *app.SessionService {
-	return app.NewSessionService(store, git, logger)
+func ProvideSessionService(store ports.Store, git ports.GitService, artifact *app.ArtifactService, logger *slog.Logger) *app.SessionService {
+	return app.NewSessionService(store, git, artifact, logger)
 }
 
-func ProvideTaskService(store ports.Store, logger *slog.Logger) *app.TaskService {
-	return app.NewTaskService(store, logger)
+func ProvideTaskService(store ports.Store, artifact *app.ArtifactService, logger *slog.Logger) *app.TaskService {
+	return app.NewTaskService(store, artifact, logger)
 }
 
-func ProvideDecisionService(store ports.Store, logger *slog.Logger) *app.DecisionService {
-	return app.NewDecisionService(store, logger)
+func ProvideDecisionService(store ports.Store, artifact *app.ArtifactService, logger *slog.Logger) *app.DecisionService {
+	return app.NewDecisionService(store, artifact, logger)
 }
 
 func ProvideEventService(store ports.Store) *app.EventService {
@@ -34,8 +34,8 @@ func ProvideWorkspaceService(git ports.GitService) *app.WorkspaceService {
 	return app.NewWorkspaceService(git)
 }
 
-func ProvideCheckpointService(store ports.Store, git ports.GitService, logger *slog.Logger, retention config.RetentionConfig) *app.CheckpointService {
-	return app.NewCheckpointService(store, git, logger, retention)
+func ProvideCheckpointService(store ports.Store, git ports.GitService, artifact *app.ArtifactService, logger *slog.Logger, retention config.RetentionConfig) *app.CheckpointService {
+	return app.NewCheckpointService(store, git, artifact, logger, retention)
 }
 
 func ProvideContextService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget, sync *app.SyncService, git ports.GitService) *app.ContextService {
@@ -50,8 +50,8 @@ func ProvideGitService() ports.GitService {
 	return gitrunner.NewRunner()
 }
 
-func ProvideHandoffService(store ports.Store, checkpoints *app.CheckpointService, renderer ports.ContextRenderer, budget ports.ContextBudget, logger *slog.Logger) *app.HandoffService {
-	return app.NewHandoffService(store, checkpoints, renderer, budget, logger)
+func ProvideHandoffService(store ports.Store, checkpoints *app.CheckpointService, artifact *app.ArtifactService, renderer ports.ContextRenderer, budget ports.ContextBudget, logger *slog.Logger) *app.HandoffService {
+	return app.NewHandoffService(store, checkpoints, artifact, renderer, budget, logger)
 }
 
 func ProvideArtifactService(store ports.Store) *app.ArtifactService {
@@ -62,8 +62,8 @@ func ProvideMemoryService(store ports.Store, logger *slog.Logger) *app.MemorySer
 	return app.NewMemoryService(store, logger)
 }
 
-func ProvideExportService(store ports.Store) *app.ExportService {
-	return app.NewExportService(store)
+func ProvideExportService(store ports.Store, sessions *app.SessionService, artifact *app.ArtifactService) *app.ExportService {
+	return app.NewExportService(store, sessions, artifact)
 }
 
 func ProvideSyncService(store ports.Store, git ports.GitService, artifact *app.ArtifactService, logger *slog.Logger) *app.SyncService {

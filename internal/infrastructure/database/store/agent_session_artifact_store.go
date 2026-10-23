@@ -2,11 +2,13 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
 
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
+	domainerr "github.com/anaknegeri/agent-session/internal/domain/errors"
 	"github.com/anaknegeri/agent-session/internal/domain/repositories"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 )
@@ -103,6 +105,22 @@ func (s *artifactStore) Create(ctx context.Context, artifact *entities.Artifact)
 		return fmt.Errorf("create artifact: %w", err)
 	}
 	return nil
+}
+
+// GetByID reads one artifact of a session. The session is in the WHERE clause
+// rather than checked after the fetch: an offloaded event payload is session data,
+// and a caller that came by an artifact_id belonging to another session must get
+// nothing back, not a row it then has to be trusted to discard.
+func (s *artifactStore) GetByID(ctx context.Context, id, sessionID string) (*entities.Artifact, error) {
+	var artifact entities.Artifact
+	err := s.db.WithContext(ctx).First(&artifact, "id = ? AND session_id = ?", id, sessionID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, domainerr.ErrArtifactNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get artifact: %w", err)
+	}
+	return &artifact, nil
 }
 
 var (

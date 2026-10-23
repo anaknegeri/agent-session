@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -25,8 +26,12 @@ func (s *decisionStore) Create(ctx context.Context, decision *entities.Decision)
 	return nil
 }
 
+// ListBySession lists the decisions of a session, as an empty slice rather than
+// nil when there are none: decision.list and session://decisions marshal this
+// straight out over MCP, and gorm leaves a nil slice for "no rows" — `null` where
+// the contract promises a list.
 func (s *decisionStore) ListBySession(ctx context.Context, sessionID string) ([]*entities.Decision, error) {
-	var decisions []*entities.Decision
+	decisions := []*entities.Decision{}
 	if err := s.db.WithContext(ctx).
 		Where("session_id = ?", sessionID).
 		Order("created_at ASC").
@@ -50,6 +55,17 @@ func (s *blockerStore) Create(ctx context.Context, blocker *entities.Blocker) er
 	return nil
 }
 
+func (s *blockerStore) GetByID(ctx context.Context, id string) (*entities.Blocker, error) {
+	var blocker entities.Blocker
+	if err := s.db.WithContext(ctx).First(&blocker, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, domainerr.ErrBlockerNotFound
+		}
+		return nil, fmt.Errorf("get blocker: %w", err)
+	}
+	return &blocker, nil
+}
+
 func (s *blockerStore) ListBySession(ctx context.Context, sessionID string) ([]*entities.Blocker, error) {
 	return s.list(ctx, sessionID, "")
 }
@@ -63,7 +79,9 @@ func (s *blockerStore) list(ctx context.Context, sessionID, status string) ([]*e
 	if status != "" {
 		q = q.Where("status = ?", status)
 	}
-	var blockers []*entities.Blocker
+	// Empty, not nil: blocker.list hands this to an agent over MCP, and a session
+	// with nothing blocked is the common case.
+	blockers := []*entities.Blocker{}
 	if err := q.Order("created_at ASC").Find(&blockers).Error; err != nil {
 		return nil, fmt.Errorf("list blockers: %w", err)
 	}

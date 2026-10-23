@@ -12,13 +12,14 @@ import (
 )
 
 type SessionService struct {
-	store  ports.Store
-	git    ports.GitService
-	logger *slog.Logger
+	store    ports.Store
+	git      ports.GitService
+	artifact *ArtifactService
+	logger   *slog.Logger
 }
 
-func NewSessionService(store ports.Store, git ports.GitService, logger *slog.Logger) *SessionService {
-	return &SessionService{store: store, git: git, logger: logger}
+func NewSessionService(store ports.Store, git ports.GitService, artifact *ArtifactService, logger *slog.Logger) *SessionService {
+	return &SessionService{store: store, git: git, artifact: artifact, logger: logger}
 }
 
 func (s *SessionService) Get(ctx context.Context, id string) (*entities.Session, error) {
@@ -90,12 +91,7 @@ func (s *SessionService) Start(ctx context.Context, projectID, title, agent stri
 			return err
 		}
 
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: session.ID,
-			Agent:     agent,
-			Type:      entities.EventSessionStarted,
-		})
+		return s.artifact.AppendEventTx(ctx, st, session.ID, agent, entities.EventSessionStarted, "")
 	})
 	if err != nil {
 		return nil, err
@@ -113,9 +109,11 @@ func (s *SessionService) Resume(ctx context.Context, projectID, agent string) (*
 		return nil, err
 	}
 	agent = safetext.Identifier(agent)
-	// Reviving the session, attaching the agent and swapping the agent session are
-	// one state change: a session left active whose agent session never opened
-	// reads as "an agent is working on this" with nothing behind it.
+	// Reviving the session, attaching the agent, swapping the agent session and
+	// recording session.resumed are one state change: a session left active whose
+	// agent session never opened reads as "an agent is working on this" with nothing
+	// behind it, and a revival with no event leaves the log claiming the session is
+	// still completed.
 	if err := s.store.Tx(ctx, func(st ports.Store) error {
 		session.Status = entities.SessionStatusActive
 		session.LastAgent = agent
@@ -124,8 +122,10 @@ func (s *SessionService) Resume(ctx context.Context, projectID, agent string) (*
 		}
 		// closes any open agent session and creates a new one, so exactly one is
 		// active even under concurrent processes
-		_, err := st.AgentSessions().Resume(ctx, session.ID, agent)
-		return err
+		if _, err := st.AgentSessions().Resume(ctx, session.ID, agent); err != nil {
+			return err
+		}
+		return s.artifact.AppendEventTx(ctx, st, session.ID, agent, entities.EventSessionResumed, "")
 	}); err != nil {
 		return nil, err
 	}
@@ -157,12 +157,7 @@ func (s *SessionService) complete(ctx context.Context, sessionID string) error {
 			return err
 		}
 
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: session.ID,
-			Agent:     session.LastAgent,
-			Type:      entities.EventSessionCompleted,
-		})
+		return s.artifact.AppendEventTx(ctx, st, session.ID, session.LastAgent, entities.EventSessionCompleted, "")
 	})
 }
 
@@ -177,12 +172,7 @@ func (s *SessionService) finalizeSuperseded(ctx context.Context, st ports.Store,
 	if err != nil {
 		return err
 	}
-	return st.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     session.LastAgent,
-		Type:      entities.EventSessionCompleted,
-	})
+	return s.artifact.AppendEventTx(ctx, st, sessionID, session.LastAgent, entities.EventSessionCompleted, "")
 }
 
 // closeActiveAgentSession ends every agent session for a session that is still

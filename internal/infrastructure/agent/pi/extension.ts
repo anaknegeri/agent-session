@@ -1,4 +1,6 @@
-// agent-session:managed — written by `agent-session init`. Edits are overwritten.
+// agent-session:managed — written by `agent-session init`. Your edits are kept:
+// the marker records a hash of the generated body, so a modified file is reported
+// as a conflict instead of being overwritten.
 //
 // pi ships no MCP client, on purpose ("No MCP. Build CLI tools with READMEs, or
 // build an extension that adds MCP support"). This extension is therefore the pi

@@ -24,6 +24,7 @@ package pi
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,8 +44,10 @@ var skillMD string
 // absolute path of the agent-session binary.
 const binPlaceholder = "__AGENT_SESSION_BIN__"
 
-// managedMarker matches the marker in both embedded files, so re-running setup
-// updates our files and never touches one the user wrote or heavily edited.
+// managedMarker is the ownership token both embedded files carry. Whether a file
+// is still ours is decided by agent.WriteManaged, which also compares the digest
+// the marker records against the body on disk, so an extension the user has tuned
+// is reported rather than overwritten.
 const managedMarker = agent.ManagedMarker
 
 // UserRoot is pi's user-scope resource root.
@@ -74,12 +77,14 @@ func renderExtension(bin string) string {
 
 // EnsureExtension writes the lifecycle extension under root.
 func EnsureExtension(root, bin string) error {
-	return agent.WriteManaged(ExtensionPath(root), renderExtension(bin))
+	_, err := agent.WriteManaged(ExtensionPath(root), renderExtension(bin))
+	return err
 }
 
 // EnsureSkill writes the CLI skill under root.
 func EnsureSkill(root string) error {
-	return agent.WriteManaged(filepath.Join(skillDir(root), "SKILL.md"), skillMD)
+	_, err := agent.WriteManaged(filepath.Join(skillDir(root), "SKILL.md"), skillMD)
+	return err
 }
 
 // EnsurePrompts writes the pi slash commands under root.
@@ -90,33 +95,29 @@ func EnsurePrompts(root string) error {
 
 // EnsureResources installs everything pi needs at the given scope root. It is
 // idempotent and never overwrites a file that is not ours.
+//
+// Every step runs even when an earlier one reports a file the user edited: one
+// hand-tuned skill must not leave the extension and the prompts uninstalled.
 func EnsureResources(root, bin string) error {
-	if err := EnsureExtension(root, bin); err != nil {
-		return err
-	}
-	if err := EnsureSkill(root); err != nil {
-		return err
-	}
-	return EnsurePrompts(root)
+	return errors.Join(
+		EnsureExtension(root, bin),
+		EnsureSkill(root),
+		EnsurePrompts(root),
+	)
 }
 
 // RemoveResources reverses EnsureResources, leaving files we do not own and any
-// other pi configuration untouched.
+// other pi configuration untouched. Like EnsureResources it finishes the whole
+// set and reports what it kept.
 func RemoveResources(root string) error {
-	if err := agent.RemoveManaged(ExtensionPath(root)); err != nil {
-		return err
-	}
-	if err := agent.RemoveManaged(filepath.Join(skillDir(root), "SKILL.md")); err != nil {
-		return err
-	}
+	_, extErr := agent.RemoveManaged(ExtensionPath(root))
+	_, skillErr := agent.RemoveManaged(filepath.Join(skillDir(root), "SKILL.md"))
 	// The skill lives in a directory of its own, so removing it leaves an empty
 	// one behind unless we clean up. Only if it is empty: a user may have put
 	// something else in there.
 	_ = os.Remove(skillDir(root))
-	if _, err := commands.UninstallSet(PromptsDir(root), Commands()); err != nil {
-		return err
-	}
-	return nil
+	_, promptsErr := commands.UninstallSet(PromptsDir(root), Commands())
+	return errors.Join(extErr, skillErr, promptsErr)
 }
 
 // Adapter wires pi at project scope.

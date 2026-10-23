@@ -26,6 +26,7 @@ package omp
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -108,12 +109,14 @@ func renderExtension(bin string) string {
 
 // EnsureExtension writes the lifecycle extension under root.
 func EnsureExtension(root, bin string) error {
-	return agent.WriteManaged(ExtensionPath(root), renderExtension(bin))
+	_, err := agent.WriteManaged(ExtensionPath(root), renderExtension(bin))
+	return err
 }
 
 // EnsureSkill writes the MCP skill under root.
 func EnsureSkill(root string) error {
-	return agent.WriteManaged(filepath.Join(skillDir(root), "SKILL.md"), skillMD)
+	_, err := agent.WriteManaged(filepath.Join(skillDir(root), "SKILL.md"), skillMD)
+	return err
 }
 
 // EnsureCommands writes the universal slash commands under root.
@@ -179,17 +182,20 @@ func RemoveMCP(root string) error {
 
 // EnsureResources installs everything omp needs at the given scope root. It is
 // idempotent and never overwrites a file that is not ours.
+//
+// Every step runs even when an earlier one reports a file the user edited: one
+// hand-tuned extension must not leave the MCP server, skill and commands
+// uninstalled.
 func EnsureResources(root, bin string) error {
-	if err := EnsureMCP(root, bin); err != nil {
-		return err
-	}
-	if err := EnsureExtension(root, bin); err != nil {
-		return err
-	}
-	if err := EnsureSkill(root); err != nil {
-		return err
-	}
-	return EnsureCommands(root)
+	// Argument order is execution order: MCP registration first, so a project
+	// that fails on an unparseable mcp.json still gets the resources that do not
+	// depend on it.
+	return errors.Join(
+		EnsureMCP(root, bin),
+		EnsureExtension(root, bin),
+		EnsureSkill(root),
+		EnsureCommands(root),
+	)
 }
 
 // RemoveResources reverses EnsureResources, leaving files we do not own and any
@@ -201,19 +207,13 @@ func EnsureResources(root, bin string) error {
 // user asked for it to be gone, with no way out but hand-editing JSON.
 func RemoveResources(root string) error {
 	mcpErr := RemoveMCP(root)
-	if err := agent.RemoveManaged(ExtensionPath(root)); err != nil {
-		return err
-	}
-	if err := agent.RemoveManaged(filepath.Join(skillDir(root), "SKILL.md")); err != nil {
-		return err
-	}
+	_, extErr := agent.RemoveManaged(ExtensionPath(root))
+	_, skillErr := agent.RemoveManaged(filepath.Join(skillDir(root), "SKILL.md"))
 	// The skill has a directory of its own; remove it only when empty, since the
 	// user may have added files beside ours.
 	_ = os.Remove(skillDir(root))
-	if _, err := commands.Uninstall(CommandsDir(root)); err != nil {
-		return err
-	}
-	return mcpErr
+	_, cmdErr := commands.Uninstall(CommandsDir(root))
+	return errors.Join(mcpErr, extErr, skillErr, cmdErr)
 }
 
 // Adapter wires omp at project scope.

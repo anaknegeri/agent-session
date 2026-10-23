@@ -55,9 +55,7 @@ func TestSmartCheckpointLimitUnderConcurrency(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			if err := s.maybeCheckpoint(ctx, session.ID, fmt.Sprintf("concurrent call %d", i)); err != nil {
-				t.Errorf("maybeCheckpoint %d: %v", i, err)
-			}
+			s.maybeCheckpoint(ctx, session.ID, fmt.Sprintf("concurrent call %d", i))
 		}(i)
 	}
 	close(start)

@@ -18,6 +18,21 @@ import (
 	"github.com/anaknegeri/agent-session/internal/infrastructure/agent/pi"
 )
 
+// keptUserEdits prints every generated file the managed helpers left as the user
+// has it, and returns whatever failures remain.
+//
+// A file the user edited is news, not a failed install: `init` is documented as
+// safe to re-run, and a hand-tuned skill or extension must not turn a re-run into
+// a red ✗ — nor be skipped in silence, which is how the user would discover next
+// month that their edits stopped being carried forward.
+func keptUserEdits(err error) error {
+	conflicts, rest := agent.SplitConflicts(err)
+	for _, c := range conflicts {
+		yellow("  ! kept your edited %s — agent-session did not overwrite it\n", c.Path)
+	}
+	return rest
+}
+
 // commandsDirFor returns the user-scope slash-command directory for an agent,
 // or "" when the agent has no slash-command directory.
 func commandsDirFor(agentName string) (string, error) {
@@ -129,11 +144,11 @@ func uninstallClaudeGlobal() error {
 // installClaude wires Claude Code via project .mcp.json + CLAUDE.md + hooks.
 func installClaude(dir, bin string) {
 	a := claude.NewAdapter(dir)
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ claude: %v\n", err)
 		return
 	}
-	if err := a.Install(ctx()); err != nil {
+	if err := keptUserEdits(a.Install(ctx())); err != nil {
 		red("✗ claude: %v\n", err)
 		return
 	}
@@ -142,11 +157,11 @@ func installClaude(dir, bin string) {
 
 func installOpenCode(dir, bin string) {
 	a := opencode.NewAdapter(dir)
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ opencode: %v\n", err)
 		return
 	}
-	if err := a.Install(ctx()); err != nil {
+	if err := keptUserEdits(a.Install(ctx())); err != nil {
 		red("✗ opencode: %v\n", err)
 		return
 	}
@@ -159,11 +174,11 @@ func installCodex(bin string) {
 		return
 	}
 	a := codex.NewAdapter()
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ codex: %v\n", err)
 		return
 	}
-	if err := a.Install(ctx()); err != nil {
+	if err := keptUserEdits(a.Install(ctx())); err != nil {
 		red("✗ codex hooks: %v\n", err)
 		return
 	}
@@ -183,7 +198,7 @@ func installCodex(bin string) {
 
 func installCursor(dir, bin string) {
 	a := cursor.NewAdapter(dir)
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ cursor: %v\n", err)
 		return
 	}
@@ -195,11 +210,11 @@ func installCursor(dir, bin string) {
 // prints the manual step.
 func installPi(dir, bin string) {
 	a := pi.NewAdapter(dir)
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ pi: %v\n", err)
 		return
 	}
-	if err := a.Install(ctx()); err != nil {
+	if err := keptUserEdits(a.Install(ctx())); err != nil {
 		red("✗ pi: %v\n", err)
 		return
 	}
@@ -235,11 +250,11 @@ func uninstallPiGlobal() error {
 // on the next session, so the files are live as soon as they are written.
 func installOmp(dir, bin string) {
 	a := omp.NewAdapter(dir)
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ omp: %v\n", err)
 		return
 	}
-	if err := a.Install(ctx()); err != nil {
+	if err := keptUserEdits(a.Install(ctx())); err != nil {
 		red("✗ omp: %v\n", err)
 		return
 	}
@@ -270,7 +285,7 @@ func uninstallOmpGlobal() error {
 
 func installCline(dir, bin string) {
 	a := cline.NewAdapter(dir)
-	if err := a.Configure(ctx(), bin); err != nil {
+	if err := keptUserEdits(a.Configure(ctx(), bin)); err != nil {
 		red("✗ cline: %v\n", err)
 		return
 	}

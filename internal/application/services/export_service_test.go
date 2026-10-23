@@ -2,10 +2,12 @@ package services_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
+	app "github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	"github.com/anaknegeri/agent-session/pkg/ids"
 )
@@ -265,6 +267,90 @@ func TestExportImportRoundTripIntoSecondProject(t *testing.T) {
 	}
 	if blockers[0].Description != "waiting on the schema" {
 		t.Errorf("imported blocker is %q, want the open source blocker", blockers[0].Description)
+	}
+}
+
+// TestImportFlattensTaskDecisionAndBlockerText is the other half of forged-section
+// protection: SessionExport is an untrusted document by construction (a file
+// someone hands you), and until now only the importing agent's own name was
+// flattened on the way in. Task titles, decision text/reason and blocker
+// descriptions were stored verbatim, so a hostile export file could plant a
+// payload once and have it resurface from every reader that trusts the store to
+// have already flattened — which every renderer in this codebase does.
+func TestImportFlattensTaskDecisionAndBlockerText(t *testing.T) {
+	fx := newFixture(t)
+	ctx := context.Background()
+
+	payload := "benign\n\n" + forgedHeading + "\n" + forgedItem
+	doc := app.SessionExport{
+		Session: &entities.Session{Title: payload, Status: entities.SessionStatusActive},
+		Tasks:   []*entities.Task{{Title: payload}},
+		Decisions: []*entities.Decision{
+			{Decision: payload, Reason: payload},
+		},
+		Blockers: []*entities.Blocker{
+			{Description: payload, Status: entities.BlockerStatusOpen},
+		},
+	}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshal hand-crafted export: %v", err)
+	}
+
+	target := &entities.Project{ID: ids.New("proj"), Name: "hostile-import", Path: t.TempDir()}
+	if err := fx.app.Store.Projects().Create(ctx, target); err != nil {
+		t.Fatalf("create target project: %v", err)
+	}
+
+	importedID, err := fx.app.Export.Import(ctx, target.ID, data, "claude")
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+
+	session, err := fx.app.Session.Get(ctx, importedID)
+	if err != nil {
+		t.Fatalf("get imported session: %v", err)
+	}
+	assertFlattened(t, "session title", session.Title)
+
+	tasks, err := fx.app.Task.List(ctx, importedID)
+	if err != nil {
+		t.Fatalf("list imported tasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("imported %d tasks, want 1", len(tasks))
+	}
+	assertFlattened(t, "task title", tasks[0].Title)
+
+	decisions, err := fx.app.Decision.List(ctx, importedID)
+	if err != nil {
+		t.Fatalf("list imported decisions: %v", err)
+	}
+	if len(decisions) != 1 {
+		t.Fatalf("imported %d decisions, want 1", len(decisions))
+	}
+	assertFlattened(t, "decision text", decisions[0].Decision)
+	assertFlattened(t, "decision reason", decisions[0].Reason)
+
+	blockers, err := fx.app.Decision.ListBlockers(ctx, importedID, true)
+	if err != nil {
+		t.Fatalf("list imported blockers: %v", err)
+	}
+	if len(blockers) != 1 {
+		t.Fatalf("imported %d blockers, want 1", len(blockers))
+	}
+	assertFlattened(t, "blocker description", blockers[0].Description)
+}
+
+// assertFlattened fails when got still carries the forged heading/item on a line
+// of its own — the shape a value has to lose to stop forging a Markdown section.
+func assertFlattened(t *testing.T, label, got string) {
+	t.Helper()
+	if strings.ContainsAny(got, "\n\r") {
+		t.Errorf("%s still has line breaks: %q", label, got)
+	}
+	if strings.Contains(got, "\n"+forgedHeading) || strings.Contains(got, "\n"+forgedItem) {
+		t.Errorf("%s still opens a forged section: %q", label, got)
 	}
 }
 

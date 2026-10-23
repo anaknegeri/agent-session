@@ -64,8 +64,12 @@ func (s *taskStore) Update(ctx context.Context, task *entities.Task) error {
 	return nil
 }
 
+// ListBySession lists the tasks of a session. The slice is empty rather than nil
+// when the session has none: it is marshalled straight out over MCP by
+// session://tasks, and gorm leaves a nil slice for "no rows" — so a client asking
+// about a fresh session was handed bare `null` where the contract promises a list.
 func (s *taskStore) ListBySession(ctx context.Context, sessionID string) ([]*entities.Task, error) {
-	var tasks []*entities.Task
+	tasks := []*entities.Task{}
 	if err := s.db.WithContext(ctx).
 		Where("session_id = ?", sessionID).
 		Order("created_at ASC").

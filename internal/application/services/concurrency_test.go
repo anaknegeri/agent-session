@@ -3,12 +3,15 @@ package services_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/anaknegeri/agent-session/internal/application/services"
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	"github.com/anaknegeri/agent-session/internal/infrastructure/database"
@@ -50,15 +53,31 @@ func newDiskFixture(t *testing.T) *diskFixture {
 }
 
 // openApp opens a fresh app instance on the shared on-disk store, simulating
-// another agent/CLI process.
+// another agent/CLI process. Fails the test immediately, so call this only
+// from the test's own goroutine: t.Fatalf's runtime.Goexit unwinds just the
+// calling goroutine, and from inside a worker goroutine that means the error
+// vanishes silently while the test reports a false pass. Worker goroutines
+// must use openAppOrErr and report through their own errs channel instead.
 func (f *diskFixture) openApp(t *testing.T) *bootstrap.App {
 	t.Helper()
-	app, err := bootstrap.Open(f.dir)
+	app, err := f.openAppOrErr(t)
 	if err != nil {
 		t.Fatalf("open app: %v", err)
 	}
-	t.Cleanup(func() { app.Store.Close() })
 	return app
+}
+
+// openAppOrErr is the goroutine-safe variant of openApp: it returns the error
+// instead of failing the test. t.Helper and t.Cleanup are safe to call from any
+// goroutine while the test is still running, unlike t.Fatalf/t.FailNow.
+func (f *diskFixture) openAppOrErr(t *testing.T) (*bootstrap.App, error) {
+	t.Helper()
+	app, err := bootstrap.Open(f.dir)
+	if err != nil {
+		return nil, err
+	}
+	t.Cleanup(func() { app.Store.Close() })
+	return app, nil
 }
 
 // TestConcurrentEventsAppend spawns N goroutines (each its own app instance on
@@ -77,7 +96,11 @@ func TestConcurrentEventsAppend(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			app2 := fx.openApp(t)
+			app2, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("writer %d open: %w", w, err)
+				return
+			}
 			for i := 0; i < perWriter; i++ {
 				if err := app2.Artifact.AppendEvent(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", ""); err != nil {
 					errs <- fmt.Errorf("writer %d append %d: %w", w, i, err)
@@ -123,7 +146,11 @@ func TestConcurrentCheckpoints(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			app2 := fx.openApp(t)
+			app2, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("writer %d open: %w", w, err)
+				return
+			}
 			for i := 0; i < 5; i++ {
 				if _, err := app2.Checkpoint.Create(ctx, fx.sessionID, fmt.Sprintf("w%d-%d", w, i), "", "agent"); err != nil {
 					errs <- fmt.Errorf("writer %d checkpoint %d: %w", w, i, err)
@@ -169,7 +196,11 @@ func TestConcurrentResumeRaces(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			app2 := fx.openApp(t)
+			app2, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("resume writer %d open: %w", w, err)
+				return
+			}
 			if _, err := app2.Session.Resume(ctx, fx.projectID, fmt.Sprintf("agent-%d", w)); err != nil {
 				errs <- fmt.Errorf("resume writer %d: %w", w, err)
 			}
@@ -199,21 +230,14 @@ func TestConcurrentResumeRaces(t *testing.T) {
 	}
 }
 
-// TestMigrationWhileOpen verifies a second process opening the same DB (which
-// runs the idempotent migration) while writes happen does not fail.
-func TestMigrationWhileOpen(t *testing.T) {
-	fx := newDiskFixture(t)
-	ctx := context.Background()
-
-	app2 := fx.openApp(t) // runs migration on open
-	if err := app2.Artifact.AppendEvent(ctx, fx.sessionID, "claude", "file.changed", ""); err != nil {
-		t.Fatalf("append via second app: %v", err)
-	}
-	app1 := fx.openApp(t)
-	if err := app1.Artifact.AppendEvent(ctx, fx.sessionID, "claude", "file.changed", ""); err != nil {
-		t.Fatalf("append via first app: %v", err)
-	}
-}
+// TestMigrationWhileOpen is deleted: it was fully sequential (open, append,
+// open, append — no goroutines, no write in flight), so despite its name it
+// never exercised migration racing a concurrent write; it would not have
+// failed if the BEGIN IMMEDIATE guarding migration were removed. The real
+// race — several processes opening and migrating a never-before-migrated (or
+// newly-pending) database at once — is already covered by
+// TestMigrateConcurrentFresh and TestMigrateConcurrentPendingUpgrade in
+// migration_test.go, which run that exact guard under real contention.
 
 // TestConcurrentKnowledgeWrites covers memory promotion and puts happening from
 // several processes at once. Knowledge writes touch two tables — knowledge and
@@ -231,7 +255,11 @@ func TestConcurrentKnowledgeWrites(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			app := fx.openApp(t)
+			app, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("writer %d open: %w", w, err)
+				return
+			}
 			for i := 0; i < perWriter; i++ {
 				content := fmt.Sprintf("writer %d fact %d about rotating refresh tokens", w, i)
 				if _, err := app.Memory.Put(ctx, fx.sessionID, entities.KnowledgeKindArchitecture, content, fmt.Sprintf("agent-%d", w)); err != nil {
@@ -273,7 +301,11 @@ func TestConcurrentStartRaces(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			app := fx.openApp(t)
+			app, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("start %d open: %w", w, err)
+				return
+			}
 			if _, err := app.Session.Start(ctx, fx.projectID, fmt.Sprintf("session %d", w), fmt.Sprintf("agent-%d", w)); err != nil {
 				errs <- fmt.Errorf("start %d: %w", w, err)
 			}
@@ -329,7 +361,11 @@ func TestLockContentionUnderLongWrite(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
-			app := fx.openApp(t)
+			app, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("writer %d open: %w", w, err)
+				return
+			}
 			if err := app.Artifact.AppendEvent(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", ""); err != nil {
 				errs <- fmt.Errorf("writer %d blocked out: %w", w, err)
 			}
@@ -343,9 +379,15 @@ func TestLockContentionUnderLongWrite(t *testing.T) {
 	}
 }
 
-// TestRecoveryAfterInterruptedWrite simulates a process killed mid-transaction:
-// the rolled-back work must be absent and the store must stay usable.
-func TestRecoveryAfterInterruptedWrite(t *testing.T) {
+// TestStoreUsableAfterSiblingConnectionAborts simulates a process killed
+// mid-transaction: a second, independent connection begins a write, inserts a
+// row, and issues an explicit ROLLBACK — SQLite's own rollback guarantees that
+// row is gone regardless of agent-session's code. What this test actually
+// verifies is agent-session's own property: the store's pooled connections are
+// not left wedged by a sibling connection's aborted write. A fresh app
+// instance must see none of the abandoned row (no torn read through the shared
+// WAL) and must still be able to write afterward.
+func TestStoreUsableAfterSiblingConnectionAborts(t *testing.T) {
 	fx := newDiskFixture(t)
 	ctx := context.Background()
 
@@ -408,4 +450,172 @@ func rawConn(t *testing.T, dir string) *sql.Conn {
 	}
 	t.Cleanup(func() { sqlDB.Close() })
 	return conn
+}
+
+// TestConcurrentHandoffRaces spawns goroutines calling handoff to different
+// target agents on the same session concurrently. Handoff sets the session's
+// owning agent unconditionally (not based on its previous value), so
+// busy_timeout serializing the writes must leave exactly one target as the
+// final owner, and every successful call must leave behind its own handoff
+// checkpoint — a lost write here would show up as a missing checkpoint.
+func TestConcurrentHandoffRaces(t *testing.T) {
+	fx := newDiskFixture(t)
+	ctx := context.Background()
+
+	targets := []string{"claude", "codex", "opencode", "pi", "omp"}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(targets))
+
+	for _, to := range targets {
+		wg.Add(1)
+		go func(to string) {
+			defer wg.Done()
+			app, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("handoff to %s open: %w", to, err)
+				return
+			}
+			if _, err := app.Handoff.Handoff(ctx, fx.sessionID, to); err != nil {
+				errs <- fmt.Errorf("handoff to %s: %w", to, err)
+			}
+		}(to)
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Fatal(e)
+	}
+
+	app := fx.openApp(t)
+	sess, err := app.Session.Get(ctx, fx.sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := ""
+	for _, to := range targets {
+		if sess.LastAgent == to {
+			owner = to
+			break
+		}
+	}
+	if owner == "" {
+		t.Fatalf("session.LastAgent = %q, want one of %v", sess.LastAgent, targets)
+	}
+
+	cps, err := app.Checkpoint.ListBySession(ctx, fx.sessionID, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoffCPs := 0
+	for _, c := range cps {
+		if c.Kind == entities.CheckpointKindHandoff {
+			handoffCPs++
+		}
+	}
+	if handoffCPs != len(targets) {
+		t.Errorf("expected %d handoff checkpoints (one per successful handoff), got %d", len(targets), handoffCPs)
+	}
+}
+
+// TestConcurrentArtifactOffload spawns writers each appending an oversized
+// (>8KiB) payload concurrently. AppendEvent commits the artifact and the event
+// referencing it in one transaction, so under contention every artifact row
+// this test creates must have exactly one event pointing back at it: never
+// zero (an artifact a half-applied write left with nothing pointing at it)
+// and never more than one (two events sharing, and one of them losing, the
+// same offloaded payload).
+func TestConcurrentArtifactOffload(t *testing.T) {
+	fx := newDiskFixture(t)
+	ctx := context.Background()
+
+	const writers = 6
+	padding := strings.Repeat("x", services.LargePayloadThreshold)
+	payloadFor := func(w int) string {
+		return fmt.Sprintf(`{"writer":%d,"padding":%q}`, w, padding)
+	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			app, err := fx.openAppOrErr(t)
+			if err != nil {
+				errs <- fmt.Errorf("writer %d open: %w", w, err)
+				return
+			}
+			if err := app.Artifact.AppendEvent(ctx, fx.sessionID, fmt.Sprintf("agent-%d", w), "file.changed", payloadFor(w)); err != nil {
+				errs <- fmt.Errorf("writer %d append: %w", w, err)
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for e := range errs {
+		t.Fatal(e)
+	}
+
+	app := fx.openApp(t)
+	events, err := app.Event.List(ctx, fx.sessionID, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// map writer index -> artifact_id, decoded from the reference AppendEvent
+	// leaves in the event's payload once it offloads.
+	refs := make(map[int]string, writers)
+	for _, e := range events {
+		if !(len(e.Agent) >= 6 && e.Agent[:6] == "agent-") || e.Type != "file.changed" {
+			continue
+		}
+		var w int
+		if n, _ := fmt.Sscanf(e.Agent, "agent-%d", &w); n != 1 {
+			continue
+		}
+		var ref struct {
+			ArtifactID string `json:"artifact_id"`
+		}
+		if err := json.Unmarshal([]byte(e.Payload), &ref); err != nil || ref.ArtifactID == "" {
+			t.Errorf("writer %d: event payload is not an artifact reference: %q", w, e.Payload)
+			continue
+		}
+		if prior, ok := refs[w]; ok {
+			t.Errorf("writer %d: two events reference artifacts (%s and %s)", w, prior, ref.ArtifactID)
+			continue
+		}
+		refs[w] = ref.ArtifactID
+	}
+	if len(refs) != writers {
+		t.Fatalf("expected %d writers with an offloaded artifact reference, got %d", writers, len(refs))
+	}
+
+	// every referenced artifact must exist, belong to this session, and hold
+	// exactly the payload its writer sent — proving no cross-writer overwrite.
+	seenArtifacts := make(map[string]bool, writers)
+	for w, artifactID := range refs {
+		if seenArtifacts[artifactID] {
+			t.Errorf("artifact %s referenced by more than one writer", artifactID)
+		}
+		seenArtifacts[artifactID] = true
+		art, err := app.Artifact.Get(ctx, fx.sessionID, artifactID)
+		if err != nil {
+			t.Errorf("writer %d: artifact %s not found: %v", w, artifactID, err)
+			continue
+		}
+		if art.Content != payloadFor(w) {
+			t.Errorf("writer %d: artifact content does not match what it sent", w)
+		}
+	}
+
+	// no artifact this test created is orphaned: the session must hold exactly
+	// as many artifact rows as there are references, not more.
+	conn := rawConn(t, fx.dir)
+	defer conn.Close()
+	var artifactCount int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifacts WHERE session_id = ?`, fx.sessionID).Scan(&artifactCount); err != nil {
+		t.Fatal(err)
+	}
+	if artifactCount != len(refs) {
+		t.Errorf("session has %d artifact rows, want exactly %d (one per referenced writer, no orphans)", artifactCount, len(refs))
+	}
 }

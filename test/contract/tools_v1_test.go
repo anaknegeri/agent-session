@@ -21,34 +21,41 @@ import (
 // `approval: never` executes tools carrying readOnlyHint and raises a permission
 // request for the rest, so flipping one changes which tools a real agent can call
 // at all. See docs/spec/mcp-tools-v1.md.
+//
+// The tools with no annotation at all write a new row on every call, so none of
+// the three hints is true for them. They carried idempotentHint until a retry was
+// shown to leave a duplicate behind.
 var toolsV1 = map[string]annotations{
 	"session.get":        {readOnly: true},
 	"session.diff":       {readOnly: true},
-	"session.checkpoint": {idempotent: true},
+	"session.checkpoint": {},
 	"session.resume":     {idempotent: true},
-	"session.record":     {idempotent: true},
+	"session.record":     {},
 
 	// context.get is idempotent, not read-only: it syncs file changes and may
 	// auto-checkpoint. context.read is the read-only path a sandboxed client uses.
 	"context.get":       {idempotent: true},
 	"context.read":      {readOnly: true},
-	"context.update":    {idempotent: true},
+	"context.update":    {},
 	"context.summarize": {readOnly: true},
 
-	"task.create": {idempotent: true},
+	"task.create": {},
 	"task.get":    {readOnly: true},
 	"task.update": {idempotent: true},
 
-	"decision.create": {idempotent: true},
+	"decision.create": {},
 	"decision.list":   {readOnly: true},
 
-	"blocker.create":  {idempotent: true},
+	"blocker.create":  {},
 	"blocker.list":    {readOnly: true},
 	"blocker.resolve": {idempotent: true},
 
-	"event.append": {idempotent: true},
+	"event.append": {},
+	// artifact.get resolves the {"artifact_id":…} an event carries once its payload
+	// crossed the offload threshold; without it that payload was unreachable.
+	"artifact.get": {readOnly: true},
 
-	"memory.put":     {idempotent: true},
+	"memory.put":     {},
 	"memory.get":     {readOnly: true},
 	"memory.search":  {readOnly: true},
 	"memory.delete":  {destructive: true},
@@ -119,11 +126,11 @@ func TestToolContractV1(t *testing.T) {
 // TestToolCountV1 states the surface size on its own, so the number quoted in the
 // README and in the spec has something holding it up.
 func TestToolCountV1(t *testing.T) {
-	if len(toolsV1) != 25 {
-		t.Fatalf("the v1 baseline lists %d tools, the spec and README say 25", len(toolsV1))
+	if len(toolsV1) != 26 {
+		t.Fatalf("the v1 baseline lists %d tools, the spec and README say 26", len(toolsV1))
 	}
-	if n := len(listTools(t)); n != 25 {
-		t.Errorf("the server exposes %d tools, v1 is 25", n)
+	if n := len(listTools(t)); n != 26 {
+		t.Errorf("the server exposes %d tools, v1 is 26", n)
 	}
 }
 

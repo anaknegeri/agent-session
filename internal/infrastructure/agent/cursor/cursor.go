@@ -34,10 +34,7 @@ func (a *Adapter) Configure(ctx context.Context, mcpCommand string) error {
 	if err := a.writeMCPConfig(cursorDir, mcpCommand); err != nil {
 		return err
 	}
-	if err := a.writeRules(cursorDir); err != nil {
-		return err
-	}
-	return nil
+	return a.writeRules()
 }
 
 func (a *Adapter) writeMCPConfig(cursorDir, mcpCommand string) error {
@@ -53,10 +50,14 @@ func (a *Adapter) writeMCPConfig(cursorDir, mcpCommand string) error {
 	return agent.WriteJSONConfig(path, config)
 }
 
+// rulesContent is a whole-file resource: the marker goes in an HTML comment
+// after the YAML frontmatter, the way commands.Command.Render does it, so
+// Cursor still parses `---` as the first line.
 const rulesContent = `---
 description: Agent Session — universal session & handoff layer for AI coding agents
 alwaysApply: true
 ---
+<!-- ` + agent.ManagedMarker + ` -->
 
 ` + agentInstructions
 
@@ -78,21 +79,37 @@ const agentInstructions = `This project uses Agent Session (agent-session) as it
    - session.checkpoint — include the next_action so the next agent can continue.
 `
 
-func (a *Adapter) writeRules(cursorDir string) error {
-	rulesDir := filepath.Join(cursorDir, "rules")
-	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
-		return fmt.Errorf("create rules dir: %w", err)
-	}
-	path := filepath.Join(rulesDir, "agent-session.mdc")
-	content, err := os.ReadFile(path)
-	if err == nil && len(content) > 0 {
-		return nil
-	}
-	return os.WriteFile(path, []byte(rulesContent), 0o644)
+// RulesPath is the always-applied rule file Cursor loads from a project.
+// Exported so anything that inspects our wiring resolves the same path this
+// adapter writes and removes.
+func RulesPath(projectRoot string) string {
+	return filepath.Join(projectRoot, ".cursor", "rules", "agent-session.mdc")
+}
+
+// writeRules installs the rule through the managed path. It used to skip any
+// non-empty file, which meant a corrected rule could never ship to anyone who
+// had already run init — and the rule is the only thing that makes Cursor follow
+// the workflow, so a wrong one stayed wrong forever.
+func (a *Adapter) writeRules() error {
+	_, err := agent.WriteManaged(RulesPath(a.projectRoot), rulesContent)
+	return err
 }
 
 func (a *Adapter) Install(ctx context.Context) error { return nil }
+
+// Uninstall deregisters the MCP server and removes the rule.
+//
+// Leaving the rule behind kept Cursor injecting alwaysApply instructions to call
+// agent-session MCP tools that this same call deregistered, so every session in
+// the project started by trying to use tools that no longer exist.
 func (a *Adapter) Uninstall(ctx context.Context) error {
+	if _, err := agent.RemoveManaged(RulesPath(a.projectRoot)); err != nil {
+		return err
+	}
+	// The rule lives in a directory of its own only when the user has no other
+	// rules, so remove it just when empty.
+	_ = os.Remove(filepath.Join(a.projectRoot, ".cursor", "rules"))
+
 	path := filepath.Join(a.projectRoot, ".cursor", "mcp.json")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil

@@ -1,4 +1,6 @@
-// agent-session:managed — written by `agent-session init`. Edits are overwritten.
+// agent-session:managed — written by `agent-session init`. Your edits are kept:
+// the marker records a hash of the generated body, so a modified file is reported
+// as a conflict instead of being overwritten.
 //
 // omp has an MCP client, so the model can read and record session state with the
 // agent-session MCP tools on its own. This extension covers what a tool call
@@ -39,11 +41,19 @@ const SHUTDOWN_TIMEOUT_MS = 1_500;
 
 // Module state, deliberately not per-session: omp imports this module once per
 // process and hands the same instance to every session runner it creates —
-// including one per `task` subagent, which inherits the parent's extension paths.
-// `resume` closes and reopens the session's agent_session row, so resuming per
-// runner would churn that row once per subagent and prepend the whole project
-// context to prompts that were deliberately scoped.
-let resumed = false;
+// including one per `task` subagent, which inherits the parent's extension paths
+// (`preloadedExtensionPaths`). `resume` closes and reopens the session's
+// agent_session row, so resuming per runner would churn that row once per
+// subagent and prepend the whole project context to prompts that were
+// deliberately scoped.
+//
+// Keyed by project root rather than a single flag, because one omp process can
+// reach more than one project: a subagent runs with `cwd: worktree ?? cwd`, so a
+// task spawned into a git worktree starts in a different directory — and a
+// project that commits `.agent/config.toml` (only the .db needs ignoring) gives
+// that worktree a project root of its own. A single boolean would resume
+// whichever root happened to start first and leave the other one unrecorded.
+const resumedRoots = new Set<string>();
 
 // projectRoot walks up for .agent/config.toml so an omp session outside an
 // agent-session project costs nothing. The CLI does the same search, but doing
@@ -84,11 +94,12 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    if (resumed) return;
     const root = projectRoot(ctx.cwd);
     if (!root) return;
-    // Set before the await: two runners starting concurrently must still resume once.
-    resumed = true;
+    if (resumedRoots.has(root)) return;
+    // Recorded before the await: two runners starting on the same root
+    // concurrently must still resume once.
+    resumedRoots.add(root);
     const text = await run(["resume", "--agent", "omp"], root);
     if (text === null) {
       // An extension that looks installed but records nothing is worse than an

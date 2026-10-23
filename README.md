@@ -6,7 +6,7 @@
   <a href="https://github.com/anaknegeri/agent-session/releases/latest"><img src="https://img.shields.io/github/v/release/anaknegeri/agent-session?style=flat-square&color=2dd4bf&label=release" alt="Latest release"></a>
   <a href="https://github.com/anaknegeri/agent-session/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/anaknegeri/agent-session/ci.yml?branch=main&style=flat-square&label=ci" alt="CI"></a>
   <a href="go.mod"><img src="https://img.shields.io/badge/go-1.25-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go 1.25"></a>
-  <img src="https://img.shields.io/badge/mcp-25%20tools%20%C2%B7%207%20resources-5eead4?style=flat-square" alt="MCP: 25 tools, 7 resources">
+  <img src="https://img.shields.io/badge/mcp-26%20tools%20%C2%B7%207%20resources-5eead4?style=flat-square" alt="MCP: 26 tools, 7 resources">
   <img src="https://img.shields.io/badge/deps-none-4ade80?style=flat-square" alt="No runtime dependencies">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
 </p>
@@ -37,7 +37,7 @@ of the work. One binary, one SQLite file per project, no daemon.
 - **Local-first, zero-config** — single binary + SQLite. No PostgreSQL, Redis, Docker, Node or Python.
 - **Agent-agnostic** — shared state over transcripts: task, decisions, progress, files, tests, blockers, next action. Adapters for Claude Code, Codex, OpenCode, Cursor, Cline, pi, omp (oh-my-pi).
 - **Git-aware** — git is the source of truth for code; the session stores only state and context.
-- **MCP-native** — 25 tools + 7 resources over stdio or streamable-http.
+- **MCP-native** — 26 tools + 7 resources over stdio or streamable-http.
 - **Human-readable** — `.agent/context/current.md` and deterministic handoff context, never locked in a proprietary DB.
 - **Checkpoint & handoff** — snapshot the work, hand it to another agent deterministically.
 - **Always available** — agents spawn the stdio MCP server on demand; optional user-scope registration.
@@ -320,9 +320,10 @@ Agent Session is designed to keep prompts small (state over transcript):
 - **Relevant memory injection** — `context.get` automatically surfaces top-k
   related knowledge (local FTS search of the current task) so agents don't
   re-derive known facts.
-- **Tool annotations** — every MCP tool carries `readOnlyHint` /
-  `destructiveHint` / `idempotentHint` so agents pick the right tool without
-  trial-and-error.
+- **Tool annotations** — MCP tools carry `readOnlyHint` /
+  `destructiveHint` / `idempotentHint` where they hold, so agents pick the right
+  tool without trial-and-error. Tools that create a record carry none: a repeat
+  call creates a second one.
 - **PreCompact checkpoint** — Claude Code saves a checkpoint before context
   compaction, so nothing is lost when the window shrinks.
 - **Agent-driven summarizer** — `context.summarize` asks the agent itself to
@@ -527,7 +528,7 @@ can tell whether it understands the layout — see
 ## Contracts
 
 A session is written by one agent and read by another, often by a different build
-of this binary. Six interfaces cross that boundary and are specified in
+of this binary. Seven interfaces cross that boundary and are specified in
 [`docs/spec`](docs/spec/README.md), all at **v1**:
 
 | Contract | Covers |
@@ -537,13 +538,15 @@ of this binary. Six interfaces cross that boundary and are specified in
 | [Event Schema](docs/spec/event-v1.md) | event types and their payloads |
 | [Context Schema](docs/spec/context-v1.md) | the rendered context document |
 | [Handoff Schema](docs/spec/handoff-v1.md) | the handoff document and its event |
-| [MCP Tool Contract](docs/spec/mcp-tools-v1.md) | the 25-tool / 7-resource surface and its annotations |
+| [MCP Tool Contract](docs/spec/mcp-tools-v1.md) | the 26-tool / 7-resource surface and its annotations |
+| [Export Schema](docs/spec/export-v1.md) | the `export`/`import` document |
 
 The versions live in [`pkg/contract`](pkg/contract/contract.go) and every one of
 them is held to its spec by [`test/contract`](test/contract), so drift fails the
-build instead of surfacing later as an agent misreading a session. `.agent/` and
-each checkpoint record the version they were written against, and a build refuses
-to read a version it does not understand rather than guess.
+build instead of surfacing later as an agent misreading a session. `.agent/`,
+each checkpoint and each export document record the version they were written
+against, and a build refuses to read a version it does not understand rather
+than guess.
 
 The rule: **bump for any change that could make an existing reader wrong**, no bump
 for additive change. See [docs/spec/README.md](docs/spec/README.md).

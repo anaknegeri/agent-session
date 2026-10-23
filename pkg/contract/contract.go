@@ -2,7 +2,7 @@
 // promises to other programs, and nothing else.
 //
 // A session is written by one agent and read by another, often by a different
-// build of this binary. Six interfaces cross that boundary and are specified in
+// build of this binary. Seven interfaces cross that boundary and are specified in
 // docs/spec:
 //
 //   - Format — the .agent/ directory layout (docs/spec/format-v1.md)
@@ -11,20 +11,21 @@
 //   - Context — the rendered context document (docs/spec/context-v1.md)
 //   - Handoff — the rendered handoff document and its event (docs/spec/handoff-v1.md)
 //   - Tools — the MCP tool and resource surface (docs/spec/mcp-tools-v1.md)
+//   - Export — the export/import document (docs/spec/export-v1.md)
 //
-// Only two of them carry their version in the data: Format writes it to
-// .agent/config.toml and Checkpoint writes it into every snapshot, because those
-// are the two a future build reads back off disk without being able to ask
-// anyone what wrote them. The other four are observed live — an MCP client lists
-// the tools it is talking to, and rendered context is read, not parsed — so a
-// number embedded in them would cost tokens and tell the reader nothing it did
-// not already know. Their versions exist here, and in the specs, for humans
-// deciding whether a change is allowed.
+// Only three of them carry their version in the data: Format writes it to
+// .agent/config.toml, Checkpoint writes it into every snapshot, and Export writes
+// it into the document, because those are the three a future build reads back off
+// disk without being able to ask anyone what wrote them. The other four are
+// observed live — an MCP client lists the tools it is talking to, and rendered
+// context is read, not parsed — so a number embedded in them would cost tokens and
+// tell the reader nothing it did not already know. Their versions exist here, and
+// in the specs, for humans deciding whether a change is allowed.
 //
 // What each version means is defined once, in docs/spec/README.md: a bump is
 // required for any change that could make an existing reader wrong, and is not
 // required for additive change. The tests in test/contract hold every one of the
-// six to its spec, so a drift fails the build rather than surfacing as another
+// seven to its spec, so a drift fails the build rather than surfacing as another
 // agent misreading a session.
 package contract
 
@@ -49,4 +50,8 @@ const (
 
 	// Tools is the version of the MCP tool and resource surface.
 	Tools = 1
+
+	// Export is the version of the export/import document, recorded as `version`
+	// in the document itself.
+	Export = 1
 )

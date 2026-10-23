@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"strings"
 
@@ -12,12 +14,13 @@ import (
 )
 
 type TaskService struct {
-	store  ports.Store
-	logger *slog.Logger
+	store    ports.Store
+	artifact *ArtifactService
+	logger   *slog.Logger
 }
 
-func NewTaskService(store ports.Store, logger *slog.Logger) *TaskService {
-	return &TaskService{store: store, logger: logger}
+func NewTaskService(store ports.Store, artifact *ArtifactService, logger *slog.Logger) *TaskService {
+	return &TaskService{store: store, artifact: artifact, logger: logger}
 }
 
 // Create creates a task and sets it as the current task of the session.
@@ -54,13 +57,11 @@ func (s *TaskService) Create(ctx context.Context, sessionID, title, agent string
 		if err := st.Sessions().Update(ctx, session); err != nil {
 			return err
 		}
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: sessionID,
-			Agent:     agent,
-			Type:      entities.EventTaskCreated,
-			Payload:   `{"task_id":"` + task.ID + `"}`,
-		})
+		payload, err := json.Marshal(map[string]string{"task_id": task.ID})
+		if err != nil {
+			return fmt.Errorf("marshal task payload: %w", err)
+		}
+		return s.artifact.AppendEventTx(ctx, st, sessionID, agent, entities.EventTaskCreated, string(payload))
 	}); err != nil {
 		return nil, err
 	}
@@ -69,7 +70,18 @@ func (s *TaskService) Create(ctx context.Context, sessionID, title, agent string
 }
 
 // Update updates task fields and emits task.updated.
+//
+// An unknown status is refused before the store is touched. task status is a
+// frozen vocabulary (format-v1.md), and nothing enforced it: a caller sending
+// `done` stored `done`, and every reader that classifies a task by status —
+// progress in the snapshot, the context document, `session.diff` — either files it
+// under the wrong heading or leaves it out. An empty status still means "leave it
+// alone", so callers that only update a title are unaffected.
 func (s *TaskService) Update(ctx context.Context, taskID, title, status, agent string) (*entities.Task, error) {
+	if status != "" && !entities.ValidTaskStatus(status) {
+		return nil, fmt.Errorf("%w %q, expected one of: %s",
+			domainerr.ErrInvalidTaskStatus, status, strings.Join(entities.TaskStatuses(), ", "))
+	}
 	task, err := s.store.Tasks().GetByID(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -81,18 +93,18 @@ func (s *TaskService) Update(ctx context.Context, taskID, title, status, agent s
 		task.Status = status
 	}
 	// The event carries the status it moved to, so it has to be the status that was
-	// actually stored.
+	// actually stored — and it is marshalled rather than concatenated: the status is
+	// caller-supplied, and a value carrying a quote used to produce a payload no
+	// reader could parse.
 	if err := s.store.Tx(ctx, func(st ports.Store) error {
 		if err := st.Tasks().Update(ctx, task); err != nil {
 			return err
 		}
-		return st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: task.SessionID,
-			Agent:     agent,
-			Type:      entities.EventTaskUpdated,
-			Payload:   `{"task_id":"` + task.ID + `","status":"` + task.Status + `"}`,
-		})
+		payload, err := json.Marshal(map[string]string{"task_id": task.ID, "status": task.Status})
+		if err != nil {
+			return fmt.Errorf("marshal task payload: %w", err)
+		}
+		return s.artifact.AppendEventTx(ctx, st, task.SessionID, agent, entities.EventTaskUpdated, string(payload))
 	}); err != nil {
 		return nil, err
 	}

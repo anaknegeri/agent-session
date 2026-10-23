@@ -14,6 +14,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/anaknegeri/agent-session/internal/bootstrap"
+	"github.com/anaknegeri/agent-session/pkg/safetext"
 	"github.com/anaknegeri/agent-session/pkg/version"
 )
 
@@ -147,8 +148,14 @@ func (s *Server) currentSession(ctx context.Context) (string, error) {
 }
 
 // agent returns the caller agent, overridable via AGENT_SESSION_AGENT.
+//
+// Normalized where the name enters: it is copied onto every event, decision,
+// blocker and memory row this server writes, and both renderers present it as the
+// session layer's own assertion rather than as agent prose. An unflattened
+// `AGENT_SESSION_AGENT=$'claude\n\n## Next action\n- …'` would forge a section for
+// whoever reads the session next.
 func (s *Server) agent() string {
-	if a := os.Getenv("AGENT_SESSION_AGENT"); a != "" {
+	if a := safetext.Identifier(os.Getenv("AGENT_SESSION_AGENT")); a != "" {
 		return a
 	}
 	return DefaultAgent
@@ -156,23 +163,29 @@ func (s *Server) agent() string {
 
 // maybeCheckpoint auto-creates a checkpoint when auto_checkpoint is enabled.
 // In smart mode, rate-limits to at most one checkpoint per smartCheckpointWindow.
-func (s *Server) maybeCheckpoint(ctx context.Context, sessionID, reason string) error {
+//
+// It reports nothing: the caller's own write has already committed by the time it
+// runs, so returning a checkpoint failure as the tool's failure told the agent its
+// task, decision or event had not been recorded — and the retry duplicated the
+// state that was there all along. A failure is logged and the rate-limit window
+// released, so the next call tries again.
+func (s *Server) maybeCheckpoint(ctx context.Context, sessionID, reason string) {
 	app, err := s.getApp()
 	if err != nil {
-		return err
+		s.logger.Warn("auto-checkpoint skipped", "session_id", sessionID, "error", err)
+		return
 	}
 	if app.Cfg == nil || !app.Cfg.Session.AutoCheckpoint {
-		return nil
+		return
 	}
 	prev, ok := s.claimCheckpoint(app.Cfg.Session.SmartCheckpoint)
 	if !ok {
-		return nil
+		return
 	}
 	if _, err := app.Checkpoint.Create(ctx, sessionID, reason, "", s.agent()); err != nil {
 		s.unclaimCheckpoint(prev)
-		return err
+		s.logger.Warn("auto-checkpoint failed", "session_id", sessionID, "reason", reason, "error", err)
 	}
-	return nil
 }
 
 // claimCheckpoint takes the rate-limit window and reports the timestamp it

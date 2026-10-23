@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ func removeProjectWiring(dir string) int {
 	}
 	targets := []target{
 		{"claude", claude.NewAdapter(dir), []string{".mcp.json", ".claude/settings.json", ".claude/CLAUDE.md"}},
-		{"cursor", cursor.NewAdapter(dir), []string{".cursor/mcp.json"}},
+		{"cursor", cursor.NewAdapter(dir), []string{".cursor/mcp.json", ".cursor/rules/agent-session.mdc"}},
 		{"cline", cline.NewAdapter(dir), []string{".vscode/settings.json", ".clinerules", ".clinerules/agent-session.md"}},
 		{"opencode", opencode.NewAdapter(dir), []string{"opencode.json", "opencode.jsonc"}},
 		{"pi", pi.NewAdapter(dir), []string{".pi/extensions/agent-session.ts"}},
@@ -76,7 +77,7 @@ func removeProjectWiring(dir string) int {
 	changed := 0
 	for _, t := range targets {
 		before := fingerprint(dir, t.probes)
-		if err := t.adapter.Uninstall(ctx()); err != nil {
+		if err := keptUserEdits(t.adapter.Uninstall(ctx())); err != nil {
 			red("✗ %s: %v\n", t.name, err)
 			continue
 		}
@@ -89,17 +90,22 @@ func removeProjectWiring(dir string) int {
 	return changed
 }
 
-// fingerprint is size-per-probe, which is enough to tell "uninstall changed
-// something" from "there was nothing of ours here" without diffing content.
+// fingerprint digests each probe, so "uninstall changed something" is told from
+// "there was nothing of ours here" by content and not by size.
+//
+// Size alone reported work that did not happen: removing our MCP entry from a
+// file and re-indenting it, or replacing a rule with one of the same length,
+// left the size unchanged and migrate printed "✓ removed … wiring" for a file it
+// had not touched — and stayed silent when it had.
 func fingerprint(dir string, probes []string) string {
 	var b strings.Builder
 	for _, p := range probes {
-		info, err := os.Stat(filepath.Join(dir, p))
+		data, err := os.ReadFile(filepath.Join(dir, p))
 		if err != nil {
 			b.WriteString(p + ":-;")
 			continue
 		}
-		fmt.Fprintf(&b, "%s:%d;", p, info.Size())
+		fmt.Fprintf(&b, "%s:%x;", p, sha256.Sum256(data))
 	}
 	return b.String()
 }

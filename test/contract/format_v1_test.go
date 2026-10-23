@@ -16,6 +16,8 @@ import (
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
 	"github.com/anaknegeri/agent-session/pkg/contract"
 	"github.com/anaknegeri/agent-session/pkg/ids"
+
+	"github.com/anaknegeri/agent-session/internal/bootstrap"
 )
 
 // formatEntriesV1 is the .agent/ layout an Agent Session Format v1 project has
@@ -83,6 +85,140 @@ func TestFormatLayoutV1(t *testing.T) {
 			t.Errorf("config.%s is %q, v1 says %q", name, got, want)
 		}
 	}
+}
+
+// TestFormatRootResolutionV1 pins the four-step search this section of the spec
+// now documents. The spec used to name a variable
+// (`AGENT_SESSION_ROOT`) that does not exist in the code — `AGENT_SESSION_PROJECT`
+// does — and omitted the git-repository-root fallback step entirely, so a reader
+// following the doc set a variable that did nothing and had no way to predict
+// where an uninitialized repo would record its session.
+func TestFormatRootResolutionV1(t *testing.T) {
+	// Step 1: the env override wins outright, even over a .agent/ directory that
+	// would otherwise resolve.
+	t.Run("env override", func(t *testing.T) {
+		withAgent := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(withAgent, ".agent"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		override := t.TempDir()
+		t.Setenv(bootstrap.ProjectEnvVar, override)
+
+		got, err := bootstrap.ResolveRoot(withAgent)
+		if err != nil {
+			t.Fatalf("resolve root: %v", err)
+		}
+		want, err := filepath.EvalSymlinks(override)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("root is %q, want the %s override %q", got, bootstrap.ProjectEnvVar, want)
+		}
+	})
+
+	// Step 2: the nearest ancestor .agent/ wins over the repository root.
+	t.Run("nearest .agent wins over repo root", func(t *testing.T) {
+		t.Setenv(bootstrap.ProjectEnvVar, "")
+		repo := t.TempDir()
+		gitInit(t, repo)
+		if err := os.MkdirAll(filepath.Join(repo, ".agent"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		nested := filepath.Join(repo, "pkg", "sub")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := bootstrap.ResolveRoot(nested)
+		if err != nil {
+			t.Fatalf("resolve root: %v", err)
+		}
+		want, err := filepath.EvalSymlinks(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("root is %q, want the repo root %q", got, want)
+		}
+	})
+
+	// Step 3: no .agent/ anywhere in the repo falls back to the repo root, not to
+	// the starting directory — the fallback the old spec text omitted.
+	t.Run("repo root fallback with no .agent anywhere", func(t *testing.T) {
+		t.Setenv(bootstrap.ProjectEnvVar, "")
+		repo := t.TempDir()
+		gitInit(t, repo)
+		nested := filepath.Join(repo, "pkg", "sub")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := bootstrap.ResolveRoot(nested)
+		if err != nil {
+			t.Fatalf("resolve root: %v", err)
+		}
+		want, err := filepath.EvalSymlinks(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("root is %q, want the repo root %q", got, want)
+		}
+	})
+
+	// Step 4: outside any git repository, the search has no boundary to stop at
+	// and resolves to the starting directory itself.
+	t.Run("starting dir outside any repo", func(t *testing.T) {
+		t.Setenv(bootstrap.ProjectEnvVar, "")
+		dir := t.TempDir()
+
+		got, err := bootstrap.ResolveRoot(dir)
+		if err != nil {
+			t.Fatalf("resolve root: %v", err)
+		}
+		want, err := filepath.EvalSymlinks(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("root is %q, want the starting dir %q", got, want)
+		}
+	})
+
+	// The repository boundary itself: an .agent/ above the repo must never claim
+	// a repo underneath it that has none of its own — the bug that made the
+	// boundary a rule in the first place.
+	t.Run("repo boundary stops an unrelated ancestor .agent", func(t *testing.T) {
+		t.Setenv(bootstrap.ProjectEnvVar, "")
+		outer := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(outer, ".agent"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		repo := filepath.Join(outer, "unrelated-repo")
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gitInit(t, repo)
+
+		got, err := bootstrap.ResolveRoot(repo)
+		if err != nil {
+			t.Fatalf("resolve root: %v", err)
+		}
+		want, err := filepath.EvalSymlinks(repo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got == want {
+			return
+		}
+		outerResolved, _ := filepath.EvalSymlinks(outer)
+		if got == outerResolved {
+			t.Errorf("root crossed the repository boundary into the unrelated ancestor .agent/ at %q", outerResolved)
+		} else {
+			t.Errorf("root is %q, want the repo root %q", got, want)
+		}
+	})
 }
 
 // TestFormatVersionIsRecordedV1 is what makes the format version usable: the
@@ -269,7 +405,7 @@ func TestIDPrefixesV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create checkpoint: %v", err)
 	}
-	memory, err := app.Memory.Put(ctx, sessionID, "note", "prefixes are part of the format", "claude")
+	memory, err := app.Memory.Put(ctx, sessionID, entities.KnowledgeKindSkill, "prefixes are part of the format", "claude")
 	if err != nil {
 		t.Fatalf("put memory: %v", err)
 	}

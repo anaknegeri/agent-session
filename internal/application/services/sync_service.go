@@ -3,12 +3,12 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/anaknegeri/agent-session/internal/application/ports"
 	"github.com/anaknegeri/agent-session/internal/domain/entities"
-	"github.com/anaknegeri/agent-session/pkg/ids"
 )
 
 // StaleThreshold is how many minutes without a checkpoint before auto-checkpoint fires.
@@ -38,14 +38,15 @@ func (s *SyncService) SyncFileChanges(ctx context.Context, sessionID, agent stri
 		return 0, err
 	}
 
-	payload, _ := json.Marshal(map[string]any{"files": files})
-	if err := s.store.Events().Append(ctx, &entities.SessionEvent{
-		ID:        ids.New("evt"),
-		SessionID: sessionID,
-		Agent:     agent,
-		Type:      entities.EventFileChanged,
-		Payload:   string(payload),
-	}); err != nil {
+	// Through the canonical append: this payload is built from every git path the
+	// session has not recorded yet, it runs on every context.get, and appending it
+	// straight to the repository skipped the closed type namespace, the 1 MiB cap
+	// and the artifact offload that bound exactly this kind of unbounded input.
+	payload, err := json.Marshal(map[string]any{"files": files})
+	if err != nil {
+		return 0, fmt.Errorf("marshal file list: %w", err)
+	}
+	if err := s.artifact.AppendEvent(ctx, sessionID, agent, entities.EventFileChanged, string(payload)); err != nil {
 		return 0, err
 	}
 
@@ -103,13 +104,22 @@ func (s *SyncService) unrecordedFiles(ctx context.Context, sessionID string, sta
 			continue
 		}
 		var payload struct {
-			Files []string `json:"files"`
-			Path  string   `json:"path"`
+			Files      []string `json:"files"`
+			Path       string   `json:"path"`
+			ArtifactID string   `json:"artifact_id"`
 		}
 		// best-effort: payload isn't guaranteed to be valid/shaped JSON, so a
 		// parse failure just means this event doesn't clear any files below.
 		if e.Payload != "" {
 			_ = json.Unmarshal([]byte(e.Payload), &payload)
+		}
+		// A file list long enough to be offloaded carries only the reference, so
+		// without resolving it the same list counts as unrecorded on every
+		// context.get and is appended again.
+		if payload.ArtifactID != "" {
+			if artifact, err := s.store.Artifacts().GetByID(ctx, payload.ArtifactID, sessionID); err == nil {
+				_ = json.Unmarshal([]byte(artifact.Content), &payload)
+			}
 		}
 		if payload.Path != "" {
 			delete(currentFiles, payload.Path)

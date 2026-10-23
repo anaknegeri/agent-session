@@ -3,10 +3,13 @@ package cline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anaknegeri/agent-session/internal/infrastructure/agent"
 )
 
 // TestConfigureRefusesJSONCSettings is the reproduction of the worst clobber this
@@ -139,6 +142,33 @@ func TestConfigureKeepsHandWrittenClineRules(t *testing.T) {
 	}
 	if got := read(t, path); got != mine {
 		t.Errorf("uninstall removed or changed the user's .clinerules:\n%s", got)
+	}
+}
+
+// The case the bare marker got wrong: a .clinerules we generated and the user then
+// tuned. It carries our marker, so setup used to overwrite it on the next `init`.
+func TestConfigureKeepsAndReportsATunedClineRule(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".clinerules")
+	a := NewAdapter(dir)
+	ctx := context.Background()
+	if err := a.Configure(ctx, "agent-session"); err != nil {
+		t.Fatalf("configure: %v", err)
+	}
+	tuned := read(t, path) + "\nAlso never touch the generated protobufs.\n"
+	write(t, path, tuned)
+
+	if err := a.Configure(ctx, "agent-session"); !errors.Is(err, agent.ErrUserModified) {
+		t.Fatalf("a tuned rule was not reported: %v", err)
+	}
+	if got := read(t, path); got != tuned {
+		t.Errorf("the user's edit was overwritten:\n%s", got)
+	}
+	if err := a.Uninstall(ctx); !errors.Is(err, agent.ErrUserModified) {
+		t.Fatalf("uninstall did not report the rule it kept: %v", err)
+	}
+	if got := read(t, path); got != tuned {
+		t.Error("uninstall deleted a rule the user had tuned")
 	}
 }
 

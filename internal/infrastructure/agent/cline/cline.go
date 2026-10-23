@@ -62,7 +62,8 @@ This project uses Agent Session (agent-session) as its session layer. Always fol
 // Ownership goes through WriteManaged: a `.clinerules` the user wrote themselves
 // has no marker and is left exactly as found.
 func (a *Adapter) writeRules() error {
-	return agent.WriteManaged(a.rulesPath(), clinerulesContent)
+	_, err := agent.WriteManaged(a.rulesPath(), clinerulesContent)
+	return err
 }
 
 // rulesPath resolves the two shapes Cline accepts. A project that already keeps
@@ -106,7 +107,7 @@ func (a *Adapter) Install(ctx context.Context) error { return nil }
 // that keeps instructing the agent: leaving it behind means an uninstalled
 // agent-session still tells Cline to call tools that are no longer registered.
 func (a *Adapter) Uninstall(ctx context.Context) error {
-	if err := agent.RemoveManaged(a.rulesPath()); err != nil {
+	if _, err := agent.RemoveManaged(a.rulesPath()); err != nil {
 		return err
 	}
 	return a.uninstallVSCodeMCP()

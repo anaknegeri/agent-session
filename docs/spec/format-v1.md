@@ -20,10 +20,16 @@ Held by [`test/contract/format_v1_test.go`](../../test/contract/format_v1_test.g
 takes it — but v1 does not create or read it: checkpoint state lives in
 `session.db`. A reader must tolerate its absence.
 
-A project root is the nearest ancestor directory containing `.agent/`, stopping at
-the repository boundary. `AGENT_SESSION_ROOT` overrides the search. Roots are
-stored canonicalised (symlinks resolved), so a project registered through
-`/var/...` is still found when opened through `/private/var/...`.
+A project root is resolved in order: `$AGENT_SESSION_PROJECT`, when it names a
+directory that exists (the MCP server is registered once at user scope, so it can
+start in a directory unrelated to the project being worked on — this is the
+explicit override); then the nearest ancestor containing `.agent/`, searching no
+further up than the enclosing git repository; then the git repository root itself,
+when the directory is inside one but holds no `.agent/` yet; then the starting
+directory. The search stops at the repository boundary so an `.agent/` above one
+project never claims an unrelated one underneath it. Roots are stored
+canonicalised (symlinks resolved), so a project registered through `/var/...` is
+still found when opened through `/private/var/...`.
 
 The `-wal` and `-shm` files are SQLite's, not ours; they appear and disappear with
 open connections and must not be committed. A `.gitignore` for the format is

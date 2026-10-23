@@ -1,8 +1,8 @@
 # Agent Session contracts
 
 A session is written by one agent and read by another, usually in a different
-process and sometimes by a different build of this binary. Six interfaces cross
-that boundary, and this directory specifies them:
+process and sometimes by a different build of this binary. Seven interfaces
+cross that boundary, and this directory specifies them:
 
 | Contract | Version | Spec | What it covers |
 | --- | --- | --- | --- |
@@ -12,6 +12,7 @@ that boundary, and this directory specifies them:
 | Context Schema | 1 | [context-v1.md](context-v1.md) | the rendered context document |
 | Handoff Schema | 1 | [handoff-v1.md](handoff-v1.md) | the rendered handoff document and its event |
 | MCP Tool Contract | 1 | [mcp-tools-v1.md](mcp-tools-v1.md) | the tool and resource surface, with annotations |
+| Export Schema | 1 | [export-v1.md](export-v1.md) | the `export`/`import` document |
 
 The version numbers live in code as constants in
 [`pkg/contract`](../../pkg/contract/contract.go), and every one of them is held to
@@ -38,10 +39,12 @@ makes the spec impossible to forget rather than merely expected.
 
 ## Which contracts carry their version in the data
 
-Only two: **Format** writes `[format] version` into `.agent/config.toml`, and
-**Checkpoint** writes `version` into every snapshot. Those are the two a future
-build reads back off disk with nobody left to ask what wrote them, so both also
-refuse a version higher than they understand rather than guess at the shape.
+Three: **Format** writes `[format] version` into `.agent/config.toml`,
+**Checkpoint** writes `version` into every snapshot, and **Export** writes
+`version` into the document. Those are the ones a future build reads back off
+disk (or off a file someone hands you) with nobody left to ask what wrote them,
+so all three also refuse a version higher than they understand rather than
+guess at the shape.
 
 The other four are observed live. An MCP client lists the tools it is talking to,
 so the surface is self-describing. Context and handoff documents are read by a
@@ -49,16 +52,12 @@ model, not parsed, so a version string in them would cost tokens and tell the
 reader nothing. Event types are their own version — the type string *is* the
 name a reader matches on.
 
-For both versioned contracts, **a missing version means v1, not v0**. The field
-was added when the format was specified, not when it changed, so no existing
-project or checkpoint needs a migration.
+For all three versioned-on-disk contracts, **a missing version means v1, not
+v0**. The field was added when the format was specified, not when it changed, so
+no existing project, checkpoint or export file needs a migration.
 
 ## What is deliberately not frozen
 
-- **The export/import format** (`agent-session export` / `import`). It is a
-  transfer format between two runs of the same version, not a boundary between
-  agents, and freezing it now would lock in a shape that has not been used in
-  anger yet. It mints new IDs on import and drops resolved blockers by design.
 - **The database schema.** `internal/infrastructure/database/migrations` is
   versioned separately, in the `schema_migrations` table. It is private to this
   binary; the contracts above are what other programs see.

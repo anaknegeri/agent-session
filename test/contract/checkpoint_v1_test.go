@@ -38,7 +38,7 @@ var snapshotV1 = []string{
 	"files.modified[] string",
 	"last_agent string",
 	"next_action string",
-	"nudges[] string",
+	"nudges[] string?",
 	"progress.completed[] string",
 	"progress.pending[] string",
 	"progress.tasks[].id string",
@@ -304,14 +304,20 @@ func assertShape(t *testing.T, what, spec string, want, got []string) {
 // jsonShape lists every JSON path in t with the type a reader finds there, so a
 // shape can be compared as data instead of by eye. Slices render as `path[]`,
 // nested objects as `parent.child`.
+//
+// A path under an `omitempty` field — or nested under one — is marked `type?`.
+// Cutting the tag at the comma used to drop that information entirely, which is
+// how checkpoint-v1.md's "every key is always present" promise stayed broken on
+// four Checkpoint fields and one Snapshot field with nobody's shape test
+// noticing: the baseline could not have said so even if someone had looked.
 func jsonShape(rt reflect.Type) []string {
 	var out []string
-	walkJSON(rt, "", &out)
+	walkJSON(rt, "", false, &out)
 	sort.Strings(out)
 	return out
 }
 
-func walkJSON(rt reflect.Type, prefix string, out *[]string) {
+func walkJSON(rt reflect.Type, prefix string, optional bool, out *[]string) {
 	for rt.Kind() == reflect.Ptr {
 		rt = rt.Elem()
 	}
@@ -319,38 +325,48 @@ func walkJSON(rt reflect.Type, prefix string, out *[]string) {
 	// Timestamp marshals itself to an RFC 3339 string; walking its embedded
 	// time.Time would describe the Go type instead of the JSON.
 	if rt == reflect.TypeOf(entities.Timestamp{}) {
-		*out = append(*out, strings.TrimSuffix(prefix, ".")+" string")
+		*out = append(*out, shapeLine(strings.TrimSuffix(prefix, "."), "string", optional))
 		return
 	}
 
 	switch rt.Kind() {
 	case reflect.Struct:
-		for i := 0; i < rt.NumField(); i++ {
+		for i := range rt.NumField() {
 			field := rt.Field(i)
 			if field.PkgPath != "" {
 				continue // unexported: not in the JSON
 			}
-			name := jsonName(field)
+			name, fieldOptional := jsonNameAndOptional(field)
 			if name == "" {
 				continue
 			}
-			walkJSON(field.Type, prefix+name+".", out)
+			// Optional is sticky going down: a key absent because its parent
+			// object is entirely omitted is exactly as absent as one omitted on
+			// its own field.
+			walkJSON(field.Type, prefix+name+".", optional || fieldOptional, out)
 		}
 	case reflect.Slice, reflect.Array:
-		walkJSON(rt.Elem(), strings.TrimSuffix(prefix, ".")+"[].", out)
+		walkJSON(rt.Elem(), strings.TrimSuffix(prefix, ".")+"[].", optional, out)
 	default:
-		*out = append(*out, fmt.Sprintf("%s %s", strings.TrimSuffix(prefix, "."), rt.Kind()))
+		*out = append(*out, shapeLine(strings.TrimSuffix(prefix, "."), rt.Kind().String(), optional))
 	}
 }
 
-func jsonName(field reflect.StructField) string {
+func shapeLine(path, typ string, optional bool) string {
+	if optional {
+		typ += "?"
+	}
+	return fmt.Sprintf("%s %s", path, typ)
+}
+
+func jsonNameAndOptional(field reflect.StructField) (name string, optional bool) {
 	tag := field.Tag.Get("json")
 	if tag == "-" {
-		return ""
+		return "", false
 	}
-	name, _, _ := strings.Cut(tag, ",")
+	name, opts, _ := strings.Cut(tag, ",")
 	if name == "" {
 		name = field.Name
 	}
-	return name
+	return name, strings.Contains(opts, "omitempty")
 }

@@ -20,20 +20,20 @@ import (
 // InitializeApp wires the application with a runtime store.
 func InitializeApp(store ports.Store, logger *slog.Logger, budget ports.ContextBudget, retention config.RetentionConfig) (*services.App, error) {
 	gitService := providers.ProvideGitService()
-	initService := providers.ProvideInitService(store, gitService, logger)
-	sessionService := providers.ProvideSessionService(store, gitService, logger)
-	taskService := providers.ProvideTaskService(store, logger)
-	decisionService := providers.ProvideDecisionService(store, logger)
+	artifactService := providers.ProvideArtifactService(store)
+	initService := providers.ProvideInitService(store, gitService, artifactService, logger)
+	sessionService := providers.ProvideSessionService(store, gitService, artifactService, logger)
+	taskService := providers.ProvideTaskService(store, artifactService, logger)
+	decisionService := providers.ProvideDecisionService(store, artifactService, logger)
 	eventService := providers.ProvideEventService(store)
 	workspaceService := providers.ProvideWorkspaceService(gitService)
-	checkpointService := providers.ProvideCheckpointService(store, gitService, logger, retention)
+	checkpointService := providers.ProvideCheckpointService(store, gitService, artifactService, logger, retention)
 	contextRenderer := providers.ProvideRenderer()
-	artifactService := providers.ProvideArtifactService(store)
 	syncService := providers.ProvideSyncService(store, gitService, artifactService, logger)
 	contextService := providers.ProvideContextService(store, checkpointService, contextRenderer, budget, syncService, gitService)
-	handoffService := providers.ProvideHandoffService(store, checkpointService, contextRenderer, budget, logger)
+	handoffService := providers.ProvideHandoffService(store, checkpointService, artifactService, contextRenderer, budget, logger)
 	memoryService := providers.ProvideMemoryService(store, logger)
-	exportService := providers.ProvideExportService(store)
+	exportService := providers.ProvideExportService(store, sessionService, artifactService)
 	app := providers.ProvideApp(initService, sessionService, taskService, decisionService, eventService, workspaceService, checkpointService, contextService, handoffService, artifactService, memoryService, exportService, syncService, store)
 	return app, nil
 }

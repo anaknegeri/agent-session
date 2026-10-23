@@ -5,6 +5,180 @@ All notable changes to Agent Session are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.1.9] — 2026-08-13
+
+### Added
+- **Export/import is now a versioned v1 contract.** `docs/spec/export-v1.md`
+  documents the document shape, the never-`null` guarantee on all seven
+  collections, and the exact drop list `Import` applies (task status forced to
+  `in_progress`, resolved blockers dropped, IDs re-minted, events/checkpoints not
+  restored). `SessionExport` carries an explicit `version`, with the same
+  absent-means-v1 / refuse-newer rule Format and Checkpoint already have. Held by
+  `test/contract/export_v1_test.go`.
+- **`session.resumed` and `blocker.resolved` are canonical events.** Both state
+  changes committed with no entry in the append-only log — a revived session or a
+  cleared blocker was invisible to the timeline. Added to the closed namespace
+  (additive; existing readers unaffected) and appended inside the same
+  transaction as the state change.
+- **Managed-file ownership now detects edits, not just presence.** The
+  `agent-session:managed` marker written into every whole-file resource (pi/omp
+  extensions, skills, slash commands, `.clinerules`, the Cursor rule) now also
+  records the agent-session version and a sha256 of the generated body. Re-install
+  behaviour: absent → create; marker present and body unchanged → update; marker
+  present, body edited → **left alone**, reported as a typed conflict rather than
+  silently skipped or silently overwritten; no marker → left alone (unchanged).
+  Files written by 0.1.7/0.1.8 carry a hashless marker and are adopted as
+  ours-and-unmodified on the next `init`, so existing installs keep receiving
+  updates instead of freezing out. Config writes (`~/.claude.json`,
+  `hooks.json`, `config.toml`, every managed file) now go through a temp-file +
+  fsync + rename instead of truncate-then-write, closing the window where a crash
+  or two concurrent `init` runs left a config file holding half a document.
+  Cursor's rule file is now managed and removed on uninstall (it previously
+  loaded once, never updated, and outlived `plugin uninstall cursor` entirely).
+  Hook ownership on Claude and Codex keys on an explicit marker written on the
+  entry, not a substring match against the command — a user's own
+  `my-agent-session-wrapper.sh` hook is no longer a false positive for removal.
+
+### Changed
+- **Every canonical event append goes through one path.** `ArtifactService`
+  gained a transaction-scoped `AppendEventTx` alongside `AppendEvent`, and the
+  seven services that used to append a hardcoded event directly through the
+  store now go through it — so the closed-namespace check, the 1 MiB payload cap
+  and the 8 KiB artifact offload apply everywhere a canonical event is written,
+  not only at the two MCP tools that happened to call `ArtifactService` already.
+  `sync_service.go`'s `file.changed` append — reached on every `context.get` —
+  was the one path actually bypassing all three; it now goes through the same
+  method.
+- **`session.record` and the other composite writes are atomic.** The MCP tool
+  used to commit its event, decision and checkpoint in three independent
+  transactions and discard the result on a later failure, so a checkpoint error
+  hid an already-committed event and decision — the agent's retry then duplicated
+  both. All three now commit in one `store.Tx`; a `maybeCheckpoint`/auto-checkpoint
+  failure after a real write is logged and the write still succeeds, rather than
+  being reported as the whole call's failure.
+- **Retention no longer runs inside the handoff's write lock**, and pruning a
+  checkpoint now removes its announcing `checkpoint.created` event in the same
+  operation — the event's payload names a `checkpoint_id` that retention used to
+  leave dangling after the 21st automatic checkpoint.
+- **Checkpoint, Decision and Blocker rows never omit a key.** `task_id`, `label`,
+  `next_action`, `agent`, `reason` and similar fields carried `omitempty`, so a
+  reader in another language following checkpoint-v1.md's "every key is always
+  present" clause found some of them missing whenever they were empty — the
+  common case. `Blocker.resolved_at` is now always present too (a zero timestamp
+  on an open blocker, never an absent key). The shape-comparison test helper
+  (`jsonShape`/`walkJSON` in `test/contract`) now sees `omitempty` at all — it used
+  to cut the json tag at the comma and lose that information entirely, which is
+  how this drifted unnoticed.
+- **Task status and knowledge kind are validated against their documented
+  vocabularies**, the same way event types already were. `task.update` and
+  `memory.put` reject a value outside the closed set with an error naming the
+  accepted ones.
+- **The agent name is normalized where it enters, everywhere it enters.**
+  `AGENT_SESSION_AGENT` (MCP server, CLI `--agent`) is now flattened through
+  `safetext.Identifier`, matching what `session.start`/`resume`/`init` already
+  did — closing the one remaining path where an unflattened name could forge a
+  Markdown section in a document another agent reads. Imported task titles,
+  decision text/reason and blocker descriptions are flattened on the way *in*
+  during `import`, not only on the way out of the renderers — a hostile export
+  file could otherwise plant a payload once and have it resurface from any reader
+  that assumes the store already flattened it (every CLI status/timeline/
+  dashboard render did not).
+- **The checkpoint→context.md path shares one git read.** Creating a checkpoint
+  and rewriting `context.md` immediately after both need the workspace state;
+  they used to read git separately. `ContextService.ReadWorkspace`/`SnapshotFrom`/
+  `WriteContextMDFrom` thread one read through both, cutting the CLI `checkpoint`
+  command and the `session.checkpoint`/`session.record` MCP tools from 2 `git`
+  subprocess calls to 1.
+- **omp's lifecycle extension resumes once per project root, not once per
+  process.** omp preloads the parent's extension paths into every `task`
+  subagent runner, and a subagent can start in a different directory — a git
+  worktree may be a different agent-session project entirely. The module-level
+  resume flag is now a set keyed by resolved root, so a second root still
+  resumes instead of never.
+- **Tool descriptions say what a tool does to the session, what it returns and
+  when to use a sibling instead.** Most were one line ("Record a blocker."), so an
+  agent picking between `blocker.create` and `blocker.list`, or `context.get` and
+  `context.read`, had only the name to go on. Glama's tool-definition score rated
+  11 of 25 C. Parameter descriptions now give defaults, valid values and where an
+  ID comes from.
+
+### Fixed
+- **Eight tools that create a record no longer claim `idempotentHint`.**
+  `session.checkpoint`, `session.record`, `context.update`, `task.create`,
+  `decision.create`, `blocker.create`, `event.append` and `memory.put` write a new
+  row with a fresh ID on every call, so a client trusting the hint could retry one
+  and leave a duplicate behind. They now carry no annotation. No tool, argument or
+  result changed; Tool Contract v1 stays v1 (see `docs/spec/mcp-tools-v1.md`).
+- **The rate-limited failure-injection harness could only fail one repository
+  method.** Generalized to fail any store operation by name, and rollback
+  coverage extended to `session.complete`, `task.update`, `blocker.create`,
+  `blocker.resolve`, `session.resume`, `memory.promote`, both directions of the
+  >8 KiB artifact offload, and the atomic `session.record` composite write.
+- **A concurrency test passed even when the regression it guarded against
+  fired.** Several tests opened a fixture database from inside a worker
+  goroutine using a helper that called `t.Fatalf` — which, from a non-test
+  goroutine, does not fail the test. Fixed with a goroutine-safe variant that
+  returns its error to the same channel the test already collects from.
+  `TestMigrationWhileOpen` (fully sequential, despite its name) was removed in
+  favour of the real concurrent-migration coverage in `migration_test.go`;
+  `TestRecoveryAfterInterruptedWrite` was renamed to describe what it actually
+  verifies (pooled connections stay usable after a sibling connection aborts a
+  write), since SQLite's own rollback is not agent-session's to test.
+- **WAL and foreign-key enforcement were in the DSN but not verified live.**
+  Added a test that opens a real database and reads `PRAGMA journal_mode` /
+  `PRAGMA foreign_keys` back, plus one behavioural cascade-delete test and a test
+  pinning `isLocked`'s exact error-string matching (a driver message change would
+  otherwise silently disable the open-retry loop).
+- **No test ran two OS processes against the same database.** Every existing
+  concurrency test was goroutines sharing one process's file locks — strictly
+  weaker than the real deployment (a long-lived MCP server plus short-lived CLI
+  hooks). Added a cross-process test that launches several real
+  `agent-session` CLI invocations concurrently against one project and asserts
+  every write landed with none missing or duplicated.
+- **Artifacts had a write path and no read path.** A payload offloaded past the
+  8 KiB threshold became `{"artifact_id":"..."}` with nothing able to resolve it
+  back. Added a session-scoped `Get`, so an artifact from one session cannot be
+  read through another session's ID.
+- **`Export` discarded query errors and shipped every session's memory.** Six of
+  its seven reads ignored their error, so a failed query silently produced a
+  smaller document that still reported success; `import` of that file then
+  quietly recreated a session missing whatever failed to read. The memory query
+  had no session predicate at all, so exporting one session's state shipped
+  every knowledge row in the project's database to whoever received the file.
+- **`Import` could leave two active sessions in a project.** It created the
+  imported session directly instead of through the exclusive path `session.start`
+  uses, so an import against a project with a live session left `GetActive`
+  picking between two arbitrarily.
+- **`TestCrossAgentHandoffSmoke` could not run against a fresh project.**
+  `--dangerously-skip-permissions` bypasses tool-call approval only; a fresh
+  directory's `.mcp.json` still needs a separate one-time trust decision that
+  Claude Code normally clears with an interactive prompt. `claude -p` cannot
+  render that prompt and failed with a misleading `Prompt is too long` instead
+  of a clear error. The test now pre-seeds `.claude/settings.local.json` with
+  the same `enabledMcpjsonServers` record an interactive approval would leave,
+  matching real usage instead of depending on a human being present for every
+  fresh temp directory.
+
+Verified before release: `go build`/`go vet`/`go test`/`go test -race` all green
+across the whole tree; the checkpoint-retention event cascade was checked live
+(25 auto checkpoints against a default keep-20 limit left exactly 20 checkpoints
+and exactly 20 matching `checkpoint.created` events, zero dangling references).
+Real-agent smoke tests, run from a terminal with working Claude Code auth (this
+harness's own shell tool cannot reach that keychain grant, which is what
+produced the false "OAuth session expired" reports earlier in this same
+release cycle — corrected here rather than left in): `TestOmpSmoke`,
+`TestPiSmoke`, `TestOpenCodeSmoke` and `TestClaudeCodeSmoke` passed against the
+installed CLIs. `TestCrossAgentHandoffSmoke` exercises its full Claude Code
+half — `task.create`, `session.record` with a checkpoint, and the rendered
+`handoff codex` context all verified to carry the same marker — then skips at
+the Codex step on a real, external ChatGPT usage-limit response (`codex login
+status` confirms the account is signed in; Codex's own error names the usage
+limit and a reset time). `TestCodexSmoke` skips for the same reason. Neither
+skip reflects a defect in this release; re-run both once the Codex quota
+resets.
+
+---
+
 ## [0.1.8] — 2026-08-13
 
 ### Fixed

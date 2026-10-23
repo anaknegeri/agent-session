@@ -206,6 +206,51 @@ func (s *ContextService) gitStatus(ctx context.Context, sessionID string) (ports
 	return status, true
 }
 
+// Workspace is one git read, held for the length of a single workflow.
+//
+// It exists because "checkpoint the session" and "rewrite context.md" both need
+// the workspace state, and running them back to back used to read git twice:
+// Checkpoint.Create built a snapshot (one `git status`), then WriteContextMD went
+// through Get, which read git again, rebuilt the same snapshot and re-ran the
+// staleness check the checkpoint had just satisfied. Every Stop hook and every
+// session.record paid for both. It is passed explicitly and never cached: two
+// calls in the same workflow see one state, and the next workflow reads git again.
+type Workspace struct {
+	Status ports.WorkspaceStatus
+	// Have is false when git is unavailable or the project path cannot be
+	// resolved; callers then skip sync, staleness and nudges rather than guessing.
+	Have bool
+}
+
+// ReadWorkspace performs the one git read a workflow is allowed to share.
+func (s *ContextService) ReadWorkspace(ctx context.Context, sessionID string) Workspace {
+	status, have := s.gitStatus(ctx, sessionID)
+	return Workspace{Status: status, Have: have}
+}
+
+// SnapshotFrom builds the checkpoint snapshot from an already-read workspace.
+func (s *ContextService) SnapshotFrom(ctx context.Context, sessionID string, ws Workspace) (*entities.Snapshot, error) {
+	return s.checkpoints.BuildSnapshotWith(ctx, sessionID, ws.Status, ws.Have)
+}
+
+// WriteContextMDFrom renders context.md from a snapshot the caller already built.
+//
+// Unlike WriteContextMD it neither syncs file changes nor auto-checkpoints: its
+// callers have just written a checkpoint from this very snapshot, and doing either
+// again would re-read git and store a second checkpoint for the same state.
+func (s *ContextService) WriteContextMDFrom(
+	ctx context.Context,
+	root, sessionID string,
+	snapshot *entities.Snapshot,
+	ws Workspace,
+) (string, error) {
+	text, err := s.render(ctx, sessionID, ContextDepthSummary, snapshot, ws.Status, ws.Have)
+	if err != nil {
+		return "", err
+	}
+	return s.writeContextFile(root, text)
+}
+
 func eventLimit(max int, depth string) int {
 	if max <= 0 {
 		return 0
@@ -234,13 +279,18 @@ func truncateString(s string, max int) string {
 	return string(runes[:max]) + "…"
 }
 
-// WriteContextMD writes context.md into the .agent dir (human-readable).
+// WriteContextMD writes context.md into the .agent dir (human-readable). It goes
+// through Get, so it syncs file changes and may auto-checkpoint; a caller that
+// already holds a snapshot wants WriteContextMDFrom instead.
 func (s *ContextService) WriteContextMD(ctx context.Context, root, sessionID string) (string, error) {
 	text, err := s.Get(ctx, sessionID, ContextDepthSummary)
 	if err != nil {
 		return "", err
 	}
+	return s.writeContextFile(root, text)
+}
 
+func (s *ContextService) writeContextFile(root, text string) (string, error) {
 	dir := filepath.Join(root, config.DirName, config.ContextDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("create context dir: %w", err)

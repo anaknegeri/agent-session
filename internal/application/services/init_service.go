@@ -19,13 +19,14 @@ type InitResult struct {
 }
 
 type InitService struct {
-	store  ports.Store
-	git    ports.GitService
-	logger *slog.Logger
+	store    ports.Store
+	git      ports.GitService
+	artifact *ArtifactService
+	logger   *slog.Logger
 }
 
-func NewInitService(store ports.Store, git ports.GitService, logger *slog.Logger) *InitService {
-	return &InitService{store: store, git: git, logger: logger}
+func NewInitService(store ports.Store, git ports.GitService, artifact *ArtifactService, logger *slog.Logger) *InitService {
+	return &InitService{store: store, git: git, artifact: artifact, logger: logger}
 }
 
 // Init sets up the project, creates the initial session and records session.started
@@ -103,12 +104,7 @@ func (s *InitService) Init(ctx context.Context, dir, agent string) (*InitResult,
 			return err
 		}
 
-		if err := st.Events().Append(ctx, &entities.SessionEvent{
-			ID:        ids.New("evt"),
-			SessionID: session.ID,
-			Agent:     agent,
-			Type:      entities.EventSessionStarted,
-		}); err != nil {
+		if err := s.artifact.AppendEventTx(ctx, st, session.ID, agent, entities.EventSessionStarted, ""); err != nil {
 			return err
 		}
 

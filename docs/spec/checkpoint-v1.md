@@ -78,6 +78,10 @@ Field notes:
 - `nudges` — session-layer observations (stale checkpoint, unrecorded files, open
   blockers), not agent-authored content. Some of them quote a blocker description,
   so they are still flattened before rendering.
+- `blockers[].resolved_at` — present on every blocker, open or resolved. An open
+  blocker carries the zero `Timestamp` (`"0001-01-01T00:00:00Z"`) rather than an
+  absent key, so distinguishing "not yet resolved" from a missing key does not
+  require special-casing this one field against the "always present" rule above.
 - Everything under `session.title`, `task.title`, `progress.*`, `decisions[]`,
   `blockers[]` and `next_action` is free text written by an agent. See
   [context-v1.md](context-v1.md) for how it must be rendered.

@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+
+	"github.com/anaknegeri/agent-session/internal/domain/entities"
 )
 
 func newStartCmd() *cobra.Command {
@@ -73,11 +75,20 @@ func newCheckpointCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cp, err := app.Checkpoint.Create(ctx(), session.ID, label, nextAction, "cli")
+			// One git read for both halves: the checkpoint's snapshot and the
+			// context.md render. Going through Checkpoint.Create then WriteContextMD
+			// read the workspace twice for the same state, on every Stop hook.
+			ws := app.Context.ReadWorkspace(ctx(), session.ID)
+			snapshot, err := app.Context.SnapshotFrom(ctx(), session.ID, ws)
 			if err != nil {
 				return err
 			}
-			if _, err := app.Context.WriteContextMD(ctx(), app.Root, session.ID); err != nil {
+			cp, err := app.Checkpoint.CreateFromSnapshot(ctx(), session.ID,
+				entities.CheckpointKindFor(label), label, nextAction, "cli", snapshot)
+			if err != nil {
+				return err
+			}
+			if _, err := app.Context.WriteContextMDFrom(ctx(), app.Root, session.ID, snapshot, ws); err != nil {
 				return err
 			}
 			fmt.Printf("Checkpoint created: %s\n", cp.ID)

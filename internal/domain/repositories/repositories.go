@@ -40,6 +40,7 @@ type DecisionRepository interface {
 
 type BlockerRepository interface {
 	Create(ctx context.Context, blocker *entities.Blocker) error
+	GetByID(ctx context.Context, id string) (*entities.Blocker, error)
 	ListBySession(ctx context.Context, sessionID string) ([]*entities.Blocker, error)
 	ListOpen(ctx context.Context, sessionID string) ([]*entities.Blocker, error)
 	Resolve(ctx context.Context, id string, resolvedAt interface{}) error
@@ -56,7 +57,9 @@ type CheckpointRepository interface {
 	GetLatest(ctx context.Context, sessionID string) (*entities.Checkpoint, error)
 	ListBySession(ctx context.Context, sessionID string, limit int) ([]*entities.Checkpoint, error)
 	// PruneKind removes the oldest checkpoints of one kind beyond keep, always
-	// preserving the session's most recent checkpoint.
+	// preserving the session's most recent checkpoint. The checkpoint.created
+	// event announcing a pruned checkpoint is removed with it, so no payload in
+	// the log carries a checkpoint_id that resolves to nothing.
 	PruneKind(ctx context.Context, sessionID, kind string, keep int) (int, error)
 }
 
@@ -73,12 +76,21 @@ type AgentSessionRepository interface {
 
 type ArtifactRepository interface {
 	Create(ctx context.Context, artifact *entities.Artifact) error
+	// GetByID reads an artifact belonging to sessionID. The session is part of the
+	// lookup rather than a check on the result: an offloaded payload is session
+	// data, and a caller holding an artifact_id from another session must not be
+	// able to read it back through its own.
+	GetByID(ctx context.Context, id, sessionID string) (*entities.Artifact, error)
 }
 
 type KnowledgeRepository interface {
 	Create(ctx context.Context, knowledge *entities.Knowledge) error
 	GetByID(ctx context.Context, id string) (*entities.Knowledge, error)
 	ListByKind(ctx context.Context, kind string, limit int) ([]*entities.Knowledge, error)
+	// ListBySession restricts the listing to one session's knowledge. Exporting a
+	// session used to list every row in the database, so a single-session export
+	// shipped the knowledge of every other session and project with it.
+	ListBySession(ctx context.Context, sessionID, kind string, limit int) ([]*entities.Knowledge, error)
 	Search(ctx context.Context, query string, limit int) ([]*entities.KnowledgeHit, error)
 	SearchAny(ctx context.Context, query string, limit int) ([]*entities.KnowledgeHit, error)
 	Delete(ctx context.Context, id string) error

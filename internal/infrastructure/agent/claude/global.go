@@ -28,9 +28,13 @@ func guardedHookCommands() map[string]string {
 	}
 }
 
+// hookEntry builds the settings.json hook group we install. The managedBy key is
+// how removal recognises it: matching on "the command mentions agent-session"
+// also matched a user's own my-agent-session-wrapper.sh hook and deleted it.
 func hookEntry(command string) map[string]any {
 	return map[string]any{
-		"matcher": "*",
+		"matcher":          "*",
+		agent.ManagedByKey: agent.ManagedByValue,
 		"hooks": []map[string]any{
 			{"type": "command", "command": command},
 		},
@@ -135,10 +139,18 @@ func hasAgentSessionHook(hooks map[string]any, event string) bool {
 	return false
 }
 
+// isAgentSessionEntry reports whether a hook group is one we installed. New
+// entries carry the explicit key; entries written before it existed are still
+// recognised by the invocation shapes we generate, so an install from an earlier
+// release is still removable — without claiming a user script that merely has
+// "agent-session" in its name.
 func isAgentSessionEntry(e any) bool {
 	entry, ok := e.(map[string]any)
 	if !ok {
 		return false
+	}
+	if agent.OwnsJSONEntry(entry) {
+		return true
 	}
 	inner, _ := entry["hooks"].([]any)
 	for _, h := range inner {
@@ -146,7 +158,7 @@ func isAgentSessionEntry(e any) bool {
 		if !ok {
 			continue
 		}
-		if cmd, _ := hm["command"].(string); strings.Contains(cmd, "agent-session") {
+		if cmd, _ := hm["command"].(string); agent.OwnsLegacyHookCommand(cmd) {
 			return true
 		}
 	}
@@ -262,8 +274,10 @@ func EnsureRule(path, rule string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
+	// A CLAUDE.md is the user's project memory: replacing it in one step means a
+	// crash mid-write cannot leave a half-file where their notes used to be.
+	if err := agent.WriteFileAtomic(path, []byte(updated), 0o644); err != nil {
+		return "", err
 	}
 	return path, nil
 }
@@ -293,8 +307,8 @@ func RemoveRule(path, rule string) error {
 		}
 		return nil
 	}
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	if err := agent.WriteFileAtomic(path, []byte(updated), 0o644); err != nil {
+		return err
 	}
 	return nil
 }

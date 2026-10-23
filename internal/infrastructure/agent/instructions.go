@@ -57,8 +57,10 @@ func EnsureAGENTSMD(root string) (string, error) {
 		header = "\n"
 	}
 	updated := string(content) + header + UniversalInstructions
-	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-		return "", fmt.Errorf("write AGENTS.md: %w", err)
+	// AGENTS.md is the user's own file, appended to rather than replaced; the
+	// rename keeps a crash from turning it into a truncated one.
+	if err := WriteFileAtomic(path, []byte(updated), 0o644); err != nil {
+		return "", err
 	}
 	return path, nil
 }

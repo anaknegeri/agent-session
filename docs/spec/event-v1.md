@@ -3,7 +3,9 @@
 The append-only event log. Events are read by other agents, by `timeline`, and by
 anything auditing what happened in a session, so a type string is a name other
 programs match on — and renaming one does not migrate the events already written
-under the old name.
+under the old name. Nothing removes an event except checkpoint retention, which
+removes a `checkpoint.created` together with the checkpoint it announces
+(see [Payloads](#payloads)).
 
 Held by [`test/contract/event_v1_test.go`](../../test/contract/event_v1_test.go).
 
@@ -21,6 +23,11 @@ Held by [`test/contract/event_v1_test.go`](../../test/contract/event_v1_test.go)
 The column is `created_at` but the JSON key is `timestamp`. That mismatch is
 frozen deliberately rather than left to be tidied up into a break later.
 
+`payload` is always present and always parseable JSON: an append carrying no
+payload stores `{}`. Rows written before that was enforced hold `''` in the column
+and are left as they are rather than migrated — a reader is handed `{}` for them,
+so no reader has to parse an empty string as JSON.
+
 ## Canonical types
 
 The namespace is closed: appending an unlisted type is rejected. An open namespace
@@ -30,10 +37,12 @@ would make this table a description of habit rather than a contract.
 | --- | --- |
 | `session.started` | init / first attach |
 | `session.completed` | session completion |
+| `session.resumed` | `session.resume` / `agent-session resume` |
 | `task.created` | `task.create` |
 | `task.updated` | `task.update` |
 | `decision.created` | `decision.create` |
 | `blocker.created` | `blocker.create` |
+| `blocker.resolved` | `blocker.resolve` |
 | `checkpoint.created` | any checkpoint, including auto and precompact |
 | `handoff.created` | `handoff` |
 | `file.changed` | the sync service, from git |
@@ -54,15 +63,21 @@ timeline resolving a checkpoint, an audit resolving a handoff — depends on the
 | `task.updated` | `task_id`, `status` |
 | `decision.created` | `decision_id` |
 | `blocker.created` | `blocker_id` |
+| `blocker.resolved` | `blocker_id` |
 | `checkpoint.created` | `checkpoint_id` |
 | `handoff.created` | `handoff_id`, `checkpoint_id`, `from_agent`, `to_agent` |
 | `file.changed` | `files` (array of paths) |
 
 `test.started`, `test.passed`, `test.failed`, `command.executed`,
-`session.started` and `session.completed` carry whatever the caller passed. v1
-promises nothing about their contents beyond being valid JSON and the artifact
-rule below — they are agent input, and pretending otherwise would freeze a shape
-no writer is holding to.
+`session.started`, `session.resumed` and `session.completed` carry whatever the
+caller passed. v1 promises nothing about their contents beyond being valid JSON
+and the artifact rule below — they are agent input, and pretending otherwise would
+freeze a shape no writer is holding to.
+
+A `checkpoint_id` always resolves. Checkpoint retention deletes old checkpoints,
+and it deletes the `checkpoint.created` event announcing each one with it — the one
+exception to the log being append-only, and the reason no payload in the log points
+at a checkpoint that is gone. No other event is ever removed.
 
 ## Large payloads
 
@@ -76,6 +91,11 @@ reference instead:
 A reader that finds `artifact_id` where it expected the payload has to know that
 is normal, and at what size it starts, or it will report the payload as lost. The
 threshold is part of the contract for that reason.
+
+The reference resolves: the `artifact.get` tool
+([mcp-tools-v1.md](mcp-tools-v1.md)) returns the offloaded payload, scoped to the
+session that wrote it. An offload that could not be read back would be a payload
+discarded with extra steps.
 
 ## Trust
 
